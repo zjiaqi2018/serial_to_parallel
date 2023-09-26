@@ -2352,8 +2352,7 @@ namespace HP_ALE
                                               constraints_volume);
       constraints_volume.close();
 
-      DynamicSparsityPattern sp(volume_dof_handler.n_dofs(),
-                                 volume_dof_handler.n_dofs());
+      DynamicSparsityPattern sp(volume_locally_relevant_dofs);
 
       DoFTools::make_sparsity_pattern(volume_dof_handler,
                                       sp,
