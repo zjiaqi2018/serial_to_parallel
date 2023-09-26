@@ -263,14 +263,15 @@ namespace HP_ALE
     void make_grid(const unsigned int n_refinement);
     void set_active_fe_indices();
     void setup_dofs();
-    void setup_hp_sparse_matrix();
+    void setup_hp_sparse_matrix(const IndexSet &hp_index_set,
+                                const IndexSet &hp_relevant_set);
     void make_coupling(Table<2, DoFTools::Coupling> &cell_coupling,
                        Table<2, DoFTools::Coupling> &face_coupling,
                        const bool                    print_pattern = false);
     void
     set_interface_dofs_flag(std::vector<unsigned int> &flag);
     void
-    make_boundary_constraints_hp();
+    make_boundary_constraints_hp(const IndexSet &hp_relevant_set);
 
     std::vector<Point<dim>>
     get_physical_face_points(
@@ -295,7 +296,7 @@ namespace HP_ALE
 
     void newton_iteration();
     void output_results(const unsigned int refinement_cycle) const;
-    void update_constraints();
+    void update_constraints(const IndexSet &hp_relevant_set);
 
     const unsigned int velocity_degree;
     const unsigned int pressure_degree;
@@ -314,6 +315,9 @@ namespace HP_ALE
     hp::FECollection<dim> volume_fe_collection;
     DoFHandler<dim>       volume_dof_handler;
 
+      IndexSet hp_index_set;
+      IndexSet hp_relevant_set;
+
     AffineConstraints<double> constraints_hp_nonzero; // for fe system
     AffineConstraints<double> constraints_hp; // flux constraints + nonzero
     AffineConstraints<double> constraints_newton_update; // boundary constraints + interface constraints
@@ -323,18 +327,23 @@ namespace HP_ALE
 
     std::vector<bool> constrainted_flag;
 
-    SparsityPattern      sparsity_pattern;
-    SparseMatrix<double> system_matrix;
+    //SparsityPattern      sparsity_pattern;
+    PETScWrappers::MPI::SparseMatrix system_matrix;
 
     //SparsityPattern      volume_sparsity_pattern;
     PETScWrappers::MPI::SparseMatrix volume_system_matrix;
 
-    Vector<double> solution;         // newton, n+1  t=m
-    Vector<double> old_solution;     // t=m-1
-    Vector<double> current_solution; // newton iteration solution n, t=m
+      PETScWrappers::MPI::Vector solution;         // newton, n+1  t=m
+      PETScWrappers::MPI::Vector old_solution;     // t=m-1
+      PETScWrappers::MPI::Vector current_solution; // newton iteration solution n, t=m
 
-    Vector<double> system_rhs;
-    Vector<double> newton_update;
+      PETScWrappers::MPI::Vector dis_solution;         // newton, n+1  t=m
+      PETScWrappers::MPI::Vector dis_old_solution;     // t=m-1
+      PETScWrappers::MPI::Vector dis_current_solution; // newton iteration solution n, t=m
+
+
+      PETScWrappers::MPI::Vector system_rhs;
+      PETScWrappers::MPI::Vector newton_update;
 
       PETScWrappers::MPI::Vector volume_solution;
       PETScWrappers::MPI::Vector volume_old_solution;
@@ -1129,11 +1138,13 @@ namespace HP_ALE
     //need to modify
   template <int dim>
   void
-  FluidStructureProblem<dim>::make_boundary_constraints_hp()
+  FluidStructureProblem<dim>::make_boundary_constraints_hp(const IndexSet &hp_relevant_set)
   {
     const unsigned int n_components_total = fe_collection.n_components();
     constraints_boundary.clear();
     constraints_hp_nonzero.clear();
+    constraints_boundary.reinit(hp_relevant_set);
+    constraints_hp_nonzero.reinit(hp_relevant_set);
     DoFTools::make_hanging_node_constraints(dof_handler, constraints_boundary);
     DoFTools::make_hanging_node_constraints(dof_handler,
                                             constraints_hp_nonzero);
@@ -2431,23 +2442,38 @@ namespace HP_ALE
                 << "+" << n_p_hydrogel << "+" << n_V << "+" << n_P << ")"
                 << "   Number of degrees of freedom for the volume fraction: "
                 << volume_dof_handler.n_dofs() << std::endl;
-      solution.reinit(dof_handler.n_dofs());
-      old_solution.reinit(dof_handler.n_dofs());
-      current_solution.reinit(dof_handler.n_dofs());
-      newton_update.reinit(dof_handler.n_dofs());
-      system_rhs.reinit(dof_handler.n_dofs());
+
+        hp_index_set = dof_handler.locally_owned_dofs();
+        hp_relevant_set = DoFTools::extract_locally_relevant_dofs(dof_handler);
+
+        solution.reinit(hp_index_set,
+                        hp_relevant_set,
+                        mpi_communicator);
+        old_solution.reinit(solution);
+        current_solution.reinit(solution);
+        newton_update.reinit(solution);
+
+        system_rhs.reinit(hp_index_set,
+                          mpi_communicator);
+
+        dis_solution.reinit(hp_index_set,
+                            mpi_communicator);
+        dis_old_solution.reinit(dis_solution);
+        dis_current_solution.reinit(dis_solution);
     }
 
-    make_boundary_constraints_hp();
+    make_boundary_constraints_hp(hp_relevant_set);
     constraints_volume.close();
 
-    update_constraints();
-    setup_hp_sparse_matrix();
+    update_constraints(hp_relevant_set);
+    setup_hp_sparse_matrix(hp_index_set, hp_relevant_set);
 
     {
       apply_initial_condition_hp();
 
-      constraints_hp.distribute(solution);
+      constraints_hp.distribute(dis_solution);
+      solution = dis_solution;
+      dis_old_solution = dis_solution;
       old_solution = solution;
       std::cout << " initial sol l2: " << solution.l2_norm() << std::endl;
     }
@@ -2549,9 +2575,10 @@ namespace HP_ALE
   //may need to modify
   template <int dim>
   void
-  FluidStructureProblem<dim>::setup_hp_sparse_matrix()
+  FluidStructureProblem<dim>::setup_hp_sparse_matrix(const IndexSet &hp_index_set,
+                                                     const IndexSet &hp_relevant_set)
   {
-    DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
+    DynamicSparsityPattern dsp(hp_relevant_set);
 
     Table<2, DoFTools::Coupling> cell_coupling, face_coupling;
 
@@ -2564,8 +2591,16 @@ namespace HP_ALE
                                          face_coupling);
     constraints_newton_update.condense(dsp);
 
-    sparsity_pattern.copy_from(dsp);
-    system_matrix.reinit(sparsity_pattern);
+
+      SparsityTools::distribute_sparsity_pattern(dsp,
+                                                 hp_index_set,
+                                                 mpi_communicator,
+                                                 hp_relevant_set);
+
+      system_matrix.reinit(hp_index_set,
+                           hp_index_set,
+                           dsp,
+                           mpi_communicator);
   }
 
 //no need to modify
@@ -2636,7 +2671,7 @@ namespace HP_ALE
     std::vector<unsigned int> &flag)
   {
     flag.clear();
-    flag.resize(dof_handler.n_dofs(), 1);
+    flag.resize(dof_handler.n_locally_owned_dofs(), 1);
     const unsigned int hydrogel_dofs_per_cell = hydrogel_fe.dofs_per_cell;
     for (const auto &cell : dof_handler.active_cell_iterators())
       if (cell_is_in_hydrogel_domain(cell))
@@ -2665,7 +2700,7 @@ namespace HP_ALE
         const Quadrature<dim - 1> st_q(generalized_unit_face_support_points);
 
         constrainted_flag.clear();
-        constrainted_flag.resize(dof_handler.n_dofs(), false);
+        constrainted_flag.resize(dof_handler.n_locally_owned_dofs(), false);
 
         FEFaceValues<dim>   stokes_fe_face_values(*mapping_pointer,
                                                   stokes_fe,
@@ -3887,6 +3922,10 @@ namespace HP_ALE
 
     system_rhs = 0;
 
+      using CellFilter =
+              FilteredIterator<typename DoFHandler<2>::active_cell_iterator>;
+
+
     const QGauss<dim> quadrature_formula(2 + 2 * velocity_degree);
     // same quadrature for all
     const hp::QCollection<dim> q_collection{quadrature_formula,
@@ -3927,8 +3966,14 @@ namespace HP_ALE
       copy_local_to_global_hp(copy_data, update_matrix);
     };
 
-    WorkStream::run(
-      dof_handler.begin_active(), dof_handler.end(), worker, copier, sd, cp);
+      WorkStream::run(CellFilter(IteratorFilters::LocallyOwnedCell(),
+                                 dof_handler.begin_active()),
+                      CellFilter(IteratorFilters::LocallyOwnedCell(),
+                                 dof_handler.end()),
+                      worker, copier, sd, cp);
+
+      system_matrix.compress(VectorOperation::add);
+      system_rhs.compress(VectorOperation::add);
       
       MatrixOut matrix_out;
       std::ofstream out ("system_matrix.gnuplot");
@@ -3967,14 +4012,14 @@ namespace HP_ALE
     // set the Newton iterate v* to v_n
     current_solution = old_solution;
     // constrain v* using the flux constraint from phis_n+1
-    constraints_hp.distribute(current_solution);
+    constraints_hp.distribute(dis_current_solution);
 
     const unsigned int max_iteration = 30;
     unsigned int       iteration     = 0;
     const double       tol           = 1e-8;
     const double       alpha_min     = 0.01;
     assemble_system_workstream(false);
-    double residual_hp = system_rhs.l2_norm();
+    /*double residual_hp = system_rhs.l2_norm();
     double g1,g2,g3,g0,g_final; // the l2 norm for the rhs u_k
     double alpha_0, alpha_2, alpha_3, alpha_final;
     double h1, h2, h3; 
@@ -4081,7 +4126,7 @@ namespace HP_ALE
                   << std::endl;
         
         iteration++;
-      }
+      }*/
     solution = current_solution;
     std::cout << " newton iteration done " << std::endl;
   }
@@ -4165,13 +4210,16 @@ namespace HP_ALE
   // Updates constraints using volume_solution (phi_n+1)
   template <int dim>
   void
-  FluidStructureProblem<dim>::update_constraints()
+  FluidStructureProblem<dim>::update_constraints(const IndexSet &hp_relevant_set)
   {
     constraints_flux.clear();
+    constraints_flux.reinit(hp_relevant_set);
     make_flux_constraints(constraints_flux);
     //  constraints_flux.print(std::cout);
     constraints_flux.close();
+
     constraints_hp.clear();
+    constraints_hp.reinit(hp_relevant_set);
     constraints_hp.merge(constraints_hp_nonzero);
     //constraints_hp.merge(side_no_flux);
     constraints_hp.merge(constraints_flux,
@@ -4179,6 +4227,7 @@ namespace HP_ALE
     constraints_hp.close();
 
     constraints_newton_update.clear();
+    constraints_newton_update.reinit(hp_relevant_set);
     constraints_newton_update.merge(constraints_boundary);
     //constraints_newton_update.merge(side_no_flux);
     constraints_newton_update.merge(constraints_flux,
@@ -4254,8 +4303,9 @@ namespace HP_ALE
           // when phi_s changed, matching conditions are changed
 
           {
-            update_constraints();
-            setup_hp_sparse_matrix();
+            update_constraints(hp_relevant_set);
+            setup_hp_sparse_matrix(hp_index_set,
+                                   hp_relevant_set);
           }
           newton_iteration();
         }
