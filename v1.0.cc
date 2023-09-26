@@ -301,7 +301,9 @@ namespace HP_ALE
     const unsigned int pressure_degree;
     const unsigned int volume_degree;
 
-    Triangulation<dim> triangulation;
+      MPI_Comm     mpi_communicator;
+      parallel::distributed::Triangulation<dim> triangulation;
+
     FESystem<dim>      stokes_fe;
     FESystem<dim>      hydrogel_fe;
     FE_Q<dim>          volume_fe; // volume fraction phi_s
@@ -324,8 +326,8 @@ namespace HP_ALE
     SparsityPattern      sparsity_pattern;
     SparseMatrix<double> system_matrix;
 
-    SparsityPattern      volume_sparsity_pattern;
-    SparseMatrix<double> volume_system_matrix;
+    //SparsityPattern      volume_sparsity_pattern;
+    PETScWrappers::MPI::SparseMatrix volume_system_matrix;
 
     Vector<double> solution;         // newton, n+1  t=m
     Vector<double> old_solution;     // t=m-1
@@ -334,9 +336,11 @@ namespace HP_ALE
     Vector<double> system_rhs;
     Vector<double> newton_update;
 
-    Vector<double> volume_solution;
-    Vector<double> volume_old_solution;
-    Vector<double> volume_system_rhs;
+      PETScWrappers::MPI::Vector volume_solution;
+      PETScWrappers::MPI::Vector volume_old_solution;
+      PETScWrappers::MPI::Vector volume_system_rhs;
+      PETScWrappers::MPI::Vector dis_volume_solution;
+      PETScWrappers::MPI::Vector dis_volume_old_solution;
 
     std::unique_ptr<MappingQ<dim>> mapping_pointer;
     hp::MappingCollection<dim>     mapping_collection;
@@ -362,6 +366,9 @@ namespace HP_ALE
     const FEValuesExtractors::Scalar extractor_hydrogel_pressure; // p2
     const FEValuesExtractors::Vector extractor_stokes_velocity;   // V
     const FEValuesExtractors::Scalar extractor_stokes_pressure;   // P1
+
+      ConditionalOStream pcout;
+      TimerOutput        computing_timer;
 
     // scratch data
     struct ScratchData
@@ -610,7 +617,11 @@ namespace HP_ALE
     , velocity_degree(velocity_degree)
     , pressure_degree(pressure_degree)
     , volume_degree(volume_degree)
-    , triangulation(Triangulation<dim>::maximum_smoothing)
+    , mpi_communicator(MPI_COMM_WORLD)
+    , triangulation(mpi_communicator,
+                    typename Triangulation<dim>::MeshSmoothing(
+                            Triangulation<dim>::smoothing_on_refinement |
+                            Triangulation<dim>::smoothing_on_coarsening))
     , stokes_fe(create_stokes_fe_list(velocity_degree, pressure_degree),
                 create_fe_multiplicities())
     , hydrogel_fe(create_hydrogel_fe_list(velocity_degree, pressure_degree),
@@ -635,6 +646,12 @@ namespace HP_ALE
     , extractor_hydrogel_pressure(dim + dim + dim)
     , extractor_stokes_velocity(dim + dim + dim + 1)
     , extractor_stokes_pressure(dim + dim + dim + 1 + dim)
+    , pcout(std::cout,
+                  (Utilities::MPI::this_mpi_process(mpi_communicator) == 0))
+    , computing_timer(mpi_communicator,
+                            pcout,
+                            TimerOutput::never,
+                            TimerOutput::wall_times)
   {
     // active fe id:
     // 0: fluid domain
@@ -1021,7 +1038,7 @@ namespace HP_ALE
           {
               GridIn<2> gridin;
               gridin.attach_triangulation(triangulation);
-              std::ifstream f("/Users/lexlee/Downloads/matrixcompare/simplemesh.msh");
+              std::ifstream f("/Users/lexlee/Downloads/serial_to_parallel-main/simplemesh.msh");
               gridin.read_msh(f);
 
 
@@ -2325,6 +2342,9 @@ namespace HP_ALE
     set_active_fe_indices();
     {
       volume_dof_handler.distribute_dofs(volume_fe_collection);
+        IndexSet volume_locally_owned_dofs = volume_dof_handler.locally_owned_dofs();
+        IndexSet volume_locally_relevant_dofs =
+                DoFTools::extract_locally_relevant_dofs(volume_dof_handler);
 
       // volume fraction constraints
       constraints_volume.clear();
@@ -2332,26 +2352,43 @@ namespace HP_ALE
                                               constraints_volume);
       constraints_volume.close();
 
-      DynamicSparsityPattern dsp(volume_dof_handler.n_dofs(),
+      DynamicSparsityPattern sp(volume_dof_handler.n_dofs(),
                                  volume_dof_handler.n_dofs());
 
       DoFTools::make_sparsity_pattern(volume_dof_handler,
-                                      dsp,
+                                      sp,
                                       constraints_volume,
                                       /*keep_constrained_dofs = */ false);
-      volume_sparsity_pattern.copy_from(dsp);
-      volume_system_matrix.reinit(volume_sparsity_pattern);
+        SparsityTools::distribute_sparsity_pattern(sp,
+                                                   volume_locally_owned_dofs,
+                                                   mpi_communicator,
+                                                   volume_locally_relevant_dofs);
 
-      volume_solution.reinit(volume_dof_handler.n_dofs());
-      volume_old_solution.reinit(volume_dof_handler.n_dofs());
-      volume_system_rhs.reinit(volume_dof_handler.n_dofs());
+        volume_system_matrix.reinit(volume_locally_owned_dofs,
+                                    volume_locally_owned_dofs,
+                                    sp,
+                                    mpi_communicator);
+        volume_system_rhs.reinit(volume_locally_owned_dofs, mpi_communicator);
+
+        //volume constraints
+        /*volume_solution.reinit(volume_locally_relevant_dofs,
+                               mpi_communicator);*/
+        volume_solution.reinit(volume_locally_owned_dofs,
+                               volume_locally_relevant_dofs,
+                               mpi_communicator);
+        volume_old_solution.reinit(volume_solution);
+
+        dis_volume_solution.reinit(volume_locally_owned_dofs,
+                                   mpi_communicator);
+        dis_volume_old_solution.reinit(dis_volume_solution);
         
         VectorTools::interpolate(*mapping_pointer,
                                  volume_dof_handler,
                                  Functions::ConstantFunction<dim>(phi_s0),
-                                 volume_solution);
+                                 dis_volume_solution);
 
-        constraints_volume.distribute(volume_solution);
+        constraints_volume.distribute(dis_volume_solution);
+        volume_solution = dis_volume_solution;
         volume_old_solution = volume_solution;
     }
 
@@ -2997,7 +3034,8 @@ namespace HP_ALE
     std::cout << " assembling volume...";
     volume_system_matrix = 0;
     volume_system_rhs    = 0;
-
+      using CellFilter =
+              FilteredIterator<typename DoFHandler<2>::active_cell_iterator>;
     const QGauss<dim> quadrature_formula(2 + volume_degree);
     // same quadrature for all
     const hp::QCollection<dim> q_collection{quadrature_formula,
@@ -3025,21 +3063,25 @@ namespace HP_ALE
     PerTaskData cp;
 
     auto worker =
-      [=](const typename DoFHandler<dim>::active_cell_iterator &cell,
+      [this](const typename DoFHandler<dim>::active_cell_iterator &cell,
           ScratchData &                                         scratch,
           PerTaskData &                                         copy_data) {
-        local_assemble_volume(cell, scratch, copy_data);
+        this->local_assemble_volume(cell, scratch, copy_data);
       };
-    auto copier = [=](const PerTaskData &copy_data) {
-      copy_local_to_global_volume(copy_data);
+    auto copier = [this](const PerTaskData &copy_data) {
+      this->copy_local_to_global_volume(copy_data);
     };
 
-    WorkStream::run(volume_dof_handler.begin_active(),
-                    volume_dof_handler.end(),
-                    worker,
-                    copier,
-                    sd,
-                    cp);
+      WorkStream::run(CellFilter(IteratorFilters::LocallyOwnedCell(),
+                                 volume_dof_handler.begin_active()),
+                      CellFilter(IteratorFilters::LocallyOwnedCell(),
+                                 volume_dof_handler.end()),
+                      worker,
+                      copier,
+                      sd,
+                      cp);
+      volume_system_matrix.compress(VectorOperation::add);
+      volume_system_rhs.compress(VectorOperation::add);
 #ifdef DEBUG_TIMING
     timer.stop();
     int old_precision = std::cout.precision();
@@ -3056,9 +3098,15 @@ namespace HP_ALE
   FluidStructureProblem<dim>::solve_volume()
   {
     std::cout << " solving volume..." << std::endl;
-    SparseDirectUMFPACK A_direct;
-    A_direct.initialize(volume_system_matrix);
-    A_direct.vmult(volume_solution, volume_system_rhs);
+    //SparseDirectUMFPACK A_direct;
+    //A_direct.initialize(volume_system_matrix);
+    //A_direct.vmult(volume_solution, volume_system_rhs);
+
+      SolverControl                    solver_control;
+      PETScWrappers::SparseDirectMUMPS solver(solver_control, mpi_communicator);
+      solver.solve(volume_system_matrix, dis_volume_solution, volume_system_rhs);
+      constraints_volume.distribute(dis_volume_solution);
+      volume_solution = dis_volume_solution;
 
     // since we are solving for ln(phi_n+1/phi_n-1) = volume_solution,
     // we need to reconstruct phi_n+1
@@ -3068,7 +3116,8 @@ namespace HP_ALE
       {
         *it = std::min((*it_old) * (std::exp(*it)), 0.99);
       }*/
-    constraints_volume.distribute(volume_solution);
+    constraints_volume.distribute(dis_volume_solution);
+      volume_solution = dis_volume_solution;
     std::cout << " done!" << std::endl;
   }
 
@@ -4146,9 +4195,10 @@ namespace HP_ALE
     VectorTools::interpolate(*mapping_pointer,
                              volume_dof_handler,
                              Functions::ConstantFunction<dim>(phi_s0),
-                             volume_solution);
+                             dis_volume_solution);
 
-    constraints_volume.distribute(volume_solution);
+    constraints_volume.distribute(dis_volume_solution);
+      volume_solution = dis_volume_solution;
     volume_old_solution = volume_solution;
   }
 
@@ -4224,12 +4274,12 @@ namespace HP_ALE
 } // namespace HP_ALE
 
 //no need to modify
-int main()
+int main(int argc, char *argv[])
 {
   try
     {
       using namespace HP_ALE;
-      dealii::MultithreadInfo::set_thread_limit(24);
+        Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
       const TestCase test_case = TestCase::case_6;
 
       std::cout << "running " << enum_str[static_cast<int>(test_case)]
