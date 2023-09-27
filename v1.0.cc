@@ -344,6 +344,7 @@ namespace HP_ALE
 
       PETScWrappers::MPI::Vector system_rhs;
       PETScWrappers::MPI::Vector newton_update;
+      PETScWrappers::MPI::Vector dis_newton_update;
 
       PETScWrappers::MPI::Vector volume_solution;
       PETScWrappers::MPI::Vector volume_old_solution;
@@ -2460,6 +2461,7 @@ namespace HP_ALE
                             mpi_communicator);
         dis_old_solution.reinit(dis_solution);
         dis_current_solution.reinit(dis_solution);
+        dis_newton_update.reinit(dis_solution);
     }
 
     make_boundary_constraints_hp(hp_relevant_set);
@@ -4010,19 +4012,21 @@ namespace HP_ALE
 
     
     // set the Newton iterate v* to v_n
-    current_solution = old_solution;
+    //current_solution = old_solution;
+    dis_current_solution = dis_old_solution;
     // constrain v* using the flux constraint from phis_n+1
     constraints_hp.distribute(dis_current_solution);
+    current_solution = dis_current_solution;
 
     const unsigned int max_iteration = 30;
     unsigned int       iteration     = 0;
     const double       tol           = 1e-8;
     const double       alpha_min     = 0.01;
     assemble_system_workstream(false);
-    /*double residual_hp = system_rhs.l2_norm();
-    double g1,g2,g3,g0,g_final; // the l2 norm for the rhs u_k
+    double residual_hp = system_rhs.l2_norm();
+    /*double g1,g2,g3,g0,g_final; // the l2 norm for the rhs u_k
     double alpha_0, alpha_2, alpha_3, alpha_final;
-    double h1, h2, h3; 
+    double h1, h2, h3; */
     
     std::cout << " initial residual = " << residual_hp << std::endl;
     if (residual_hp<tol)
@@ -4030,14 +4034,29 @@ namespace HP_ALE
       std::cout<<"Simulation has converged!"<<std::endl;
       abort();   
     }
-    SparseDirectUMFPACK matrix_direct;
+    //SparseDirectUMFPACK matrix_direct;
+      SolverControl                    solver_control;
+      PETScWrappers::SparseDirectMUMPS solver(solver_control, mpi_communicator);
 
     // current_solution = solution;
     while (iteration < max_iteration && residual_hp > tol)
       {
+          assemble_system_workstream(
+                  true /*assemble matrix*/); // get system rhs();
+          //    system_matrix.print(std::cout, false, true);
 
-        alpha_3 = 1;
-        const Vector<double> u_k = current_solution;
+          dis_newton_update = system_rhs;
+          solver.solve(system_matrix, dis_newton_update, system_rhs);
+          constraints_newton_update.distribute(dis_newton_update);
+          dis_current_solution += dis_newton_update;
+          current_solution = dis_current_solution;
+          residual_hp = system_rhs.l2_norm();
+          std::cout << " k= " << iteration << " residual = " << residual_hp
+                    << std::endl;
+
+          iteration++;
+        /*alpha_3 = 1;
+        PETScWrappers::MPI::Vector u_k = dis_current_solution;
         assemble_system_workstream(true); // true: assemble matrix
         matrix_direct.initialize(system_matrix);
         g1 = system_rhs.l2_norm();
@@ -4125,8 +4144,8 @@ namespace HP_ALE
                     << " alpha= " << alpha_final
                   << std::endl;
         
-        iteration++;
-      }*/
+        iteration++;*/
+      }
     solution = current_solution;
     std::cout << " newton iteration done " << std::endl;
   }
