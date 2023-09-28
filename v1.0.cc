@@ -327,6 +327,8 @@ namespace HP_ALE
 
     std::vector<bool> constrainted_flag;
 
+      SparsityPattern      sparsity_pattern;
+
     //SparsityPattern      sparsity_pattern;
     PETScWrappers::MPI::SparseMatrix system_matrix;
 
@@ -2593,16 +2595,22 @@ namespace HP_ALE
                                          face_coupling);
     constraints_newton_update.condense(dsp);
 
+      sparsity_pattern.copy_from(dsp);
+
 
       SparsityTools::distribute_sparsity_pattern(dsp,
                                                  hp_index_set,
                                                  mpi_communicator,
                                                  hp_relevant_set);
-
       system_matrix.reinit(hp_index_set,
                            hp_index_set,
                            dsp,
                            mpi_communicator);
+
+      system_matrix.reinit(hp_index_set,
+                             sparsity_pattern,
+                             mpi_communicator);
+
   }
 
 //no need to modify
@@ -4332,8 +4340,8 @@ namespace HP_ALE
         volume_old_solution = volume_solution;
         old_solution        = solution;
         ++step;
-        if (step % 1 == 0)
-          output_results(step);
+        //if (step % 1 == 0)
+          //output_results(step);
         time += time_step;
       }
     while (time < final_time);
