@@ -69,7 +69,6 @@
 #include <locale>
 #include <deal.II/base/symmetric_tensor.h>
 #include <deal.II/base/data_out_base.h>
-
 #include <deal.II/grid/tria.h>
 #include <deal.II/lac/matrix_out.h>
 #include <deal.II/base/data_out_base.h>
@@ -113,7 +112,8 @@
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/numerics/vector_tools.h>
 #include <fstream>
-#include <iostream>#include <deal.II/grid/tria.h>
+#include <iostream>
+#include <deal.II/grid/tria.h>
 #include <deal.II/lac/matrix_out.h>
 #include <deal.II/base/data_out_base.h>
 #include <deal.II/grid/tria_accessor.h>
@@ -173,47 +173,6 @@ namespace HP_ALE
       case_7
   };
   static const char *enum_str[] = {"case_1","case_2","case_3","case_4","case_5","case_6","case_7"};
-
-  template <int dim>
-  void
-  print_mesh_info(const Triangulation<dim> &triangulation,
-                  const std::string &       filename)
-  {
-    std::cout << "Mesh info:" << std::endl
-              << " dimension: " << dim << std::endl
-              << " no. of cells: " << triangulation.n_active_cells()
-              << std::endl;
-
-    {
-      std::map<types::boundary_id, unsigned int> boundary_count;
-      for (const auto &face : triangulation.active_face_iterators())
-        if (face->at_boundary())
-          boundary_count[face->boundary_id()]++;
-      std::cout << " boundary indicators: ";
-      for (const std::pair<const types::boundary_id, unsigned int> &pair :
-           boundary_count)
-        {
-          std::cout << pair.first << "(" << pair.second << " times) ";
-        }
-      std::cout << std::endl;
-    }
-    {
-    	std::map<types::material_id, unsigned int> material_id_count;
-    	for (const auto &cell : triangulation.active_cell_iterators())
-    		material_id_count[cell->material_id()]++;
-    	std::cout << " material id indicators: ";
-    	for (const std::pair<const types::material_id, unsigned int> &pair :
-    	material_id_count)
-    	{
-    		std::cout << pair.first << '(' << pair.second << " times) ";
-    	}
-    	std::cout << std::endl;
-    }
-    std::ofstream out(filename);
-    GridOut       grid_out;
-    grid_out.write_vtu(triangulation, out);
-    std::cout << " written to " << filename << std::endl << std::endl;
-  }
 
   template <int dim>
   class FluidStructureProblem
@@ -302,8 +261,8 @@ namespace HP_ALE
     const unsigned int pressure_degree;
     const unsigned int volume_degree;
 
-      MPI_Comm     mpi_communicator;
-      parallel::distributed::Triangulation<dim> triangulation;
+    MPI_Comm     mpi_communicator;
+    parallel::distributed::Triangulation<dim> triangulation;
 
     FESystem<dim>      stokes_fe;
     FESystem<dim>      hydrogel_fe;
@@ -315,8 +274,10 @@ namespace HP_ALE
     hp::FECollection<dim> volume_fe_collection;
     DoFHandler<dim>       volume_dof_handler;
 
-      IndexSet hp_index_set;
-      IndexSet hp_relevant_set;
+    IndexSet volume_locally_owned_dofs;
+    IndexSet volume_locally_relevant_dofs;
+    IndexSet hp_index_set;
+    IndexSet hp_relevant_set;
 
     AffineConstraints<double> constraints_hp_nonzero; // for fe system
     AffineConstraints<double> constraints_hp; // flux constraints + nonzero
@@ -326,8 +287,7 @@ namespace HP_ALE
     AffineConstraints<double> constraints_flux;
 
     std::vector<bool> constrainted_flag;
-
-      SparsityPattern      sparsity_pattern;
+    SparsityPattern      sparsity_pattern;
 
     //SparsityPattern      sparsity_pattern;
     PETScWrappers::MPI::SparseMatrix system_matrix;
@@ -335,24 +295,23 @@ namespace HP_ALE
     //SparsityPattern      volume_sparsity_pattern;
     PETScWrappers::MPI::SparseMatrix volume_system_matrix;
 
-      PETScWrappers::MPI::Vector solution;         // newton, n+1  t=m
-      PETScWrappers::MPI::Vector old_solution;     // t=m-1
-      PETScWrappers::MPI::Vector current_solution; // newton iteration solution n, t=m
+    PETScWrappers::MPI::Vector solution;         // newton, n+1  t=m
+    PETScWrappers::MPI::Vector old_solution;     // t=m-1
+    PETScWrappers::MPI::Vector current_solution; // newton iteration solution n, t=m
 
-      PETScWrappers::MPI::Vector dis_solution;         // newton, n+1  t=m
-      PETScWrappers::MPI::Vector dis_old_solution;     // t=m-1
-      PETScWrappers::MPI::Vector dis_current_solution; // newton iteration solution n, t=m
+    PETScWrappers::MPI::Vector dis_solution;         // newton, n+1  t=m
+    PETScWrappers::MPI::Vector dis_old_solution;     // t=m-1
+    PETScWrappers::MPI::Vector dis_current_solution; // newton iteration solution n, t=m
 
+    PETScWrappers::MPI::Vector system_rhs;
+    PETScWrappers::MPI::Vector newton_update;
+    PETScWrappers::MPI::Vector dis_newton_update;
 
-      PETScWrappers::MPI::Vector system_rhs;
-      PETScWrappers::MPI::Vector newton_update;
-      PETScWrappers::MPI::Vector dis_newton_update;
-
-      PETScWrappers::MPI::Vector volume_solution;
-      PETScWrappers::MPI::Vector volume_old_solution;
-      PETScWrappers::MPI::Vector volume_system_rhs;
-      PETScWrappers::MPI::Vector dis_volume_solution;
-      PETScWrappers::MPI::Vector dis_volume_old_solution;
+    PETScWrappers::MPI::Vector volume_solution;
+    PETScWrappers::MPI::Vector volume_old_solution;
+    PETScWrappers::MPI::Vector volume_system_rhs;
+    PETScWrappers::MPI::Vector dis_volume_solution;
+    PETScWrappers::MPI::Vector dis_volume_old_solution;
 
     std::unique_ptr<MappingQ<dim>> mapping_pointer;
     hp::MappingCollection<dim>     mapping_collection;
@@ -379,8 +338,8 @@ namespace HP_ALE
     const FEValuesExtractors::Vector extractor_stokes_velocity;   // V
     const FEValuesExtractors::Scalar extractor_stokes_pressure;   // P1
 
-      ConditionalOStream pcout;
-      TimerOutput        computing_timer;
+    ConditionalOStream pcout;
+    TimerOutput        computing_timer;
 
     // scratch data
     struct ScratchData
@@ -558,12 +517,10 @@ namespace HP_ALE
     assemble_system_workstream(const bool update_matrix = true);
     void
     assemble_volume_system_workstream();
-    // void reconstruct_volume();
     void
     solve_volume();
   };
 
-//no need to modify
   template <int dim>
   std::vector<const FiniteElement<dim> *>
   FluidStructureProblem<dim>::create_hydrogel_fe_list(
@@ -582,7 +539,6 @@ namespace HP_ALE
     return fe_list;
   }
 
-  //no need to modify
   template <int dim>
   std::vector<const FiniteElement<dim> *>
   FluidStructureProblem<dim>::create_stokes_fe_list(
@@ -602,7 +558,6 @@ namespace HP_ALE
     return fe_list;
   }
 
-//no need to modify
   template <int dim>
   std::vector<unsigned int>
   FluidStructureProblem<dim>::create_fe_multiplicities()
@@ -618,7 +573,6 @@ namespace HP_ALE
     return multiplicities;
   }
 
-    //no need to modify
   template <int dim>
   FluidStructureProblem<dim>::FluidStructureProblem(
     const unsigned int velocity_degree,
@@ -739,7 +693,6 @@ namespace HP_ALE
     mapping_collection.push_back(*mapping_pointer);
   }
 
-  //no need to modify
   template <int dim>
   bool
   FluidStructureProblem<dim>::cell_is_in_fluid_domain(
@@ -748,7 +701,6 @@ namespace HP_ALE
     return (cell->material_id() == fluid_domain_id);
   }
 
-//no need to modify
   template <int dim>
   bool
   FluidStructureProblem<dim>::cell_is_in_hydrogel_domain(
@@ -757,12 +709,11 @@ namespace HP_ALE
     return (cell->material_id() == hydrogel_domain_id);
   }
 
-    //no need to modify
   template <int dim>
   void
   FluidStructureProblem<dim>::print_variables()
   {
-    std::cout << "viscosity: " << viscosity << std::endl
+        pcout << "viscosity: " << viscosity << std::endl
               << "vis_BM   : " << vis_BM << std::endl
               << "mu_s     : " << mu_s << std::endl
               << "lambda_s : " << lambda_s << std::endl
@@ -773,7 +724,6 @@ namespace HP_ALE
               << "alpha    : " << alpha << std::endl;
   }
 
-    //need to modify
   template <int dim>
   void
   FluidStructureProblem<dim>::make_grid(const unsigned int n_refinement)
@@ -1105,14 +1055,13 @@ namespace HP_ALE
           AssertThrow(false, ExcNotImplemented());
       }
 
-      hmin =
+     /* hmin =
       GridTools::minimal_cell_diameter(triangulation) / std::sqrt(1. * dim);
       const double hmax =
       GridTools::maximal_cell_diameter(triangulation) / std::sqrt(1. * dim);
-    std::cout << " hmin = " << hmin << " hmax = " << hmax << std::endl;
+    pcout << " hmin = " << hmin << " hmax = " << hmax << std::endl;*/
   }
 
-    //no need to modify
   template <int dim>
   void
   FluidStructureProblem<dim>::set_active_fe_indices()
@@ -1123,22 +1072,24 @@ namespace HP_ALE
 
     for (; cell_hp != endc; ++cell_volume, ++cell_hp)
       {
-        if (cell_is_in_fluid_domain(cell_hp))
-          {
-            cell_hp->set_active_fe_index(0);
-            cell_volume->set_active_fe_index(0);
-          }
-        else if (cell_is_in_hydrogel_domain(cell_hp))
-          {
-            cell_hp->set_active_fe_index(1);
-            cell_volume->set_active_fe_index(1);
-          }
-        else
-          Assert(false, ExcNotImplemented());
+        if (cell_hp->is_locally_owned())
+        {
+            if (cell_is_in_fluid_domain(cell_hp))
+            {
+                cell_hp->set_active_fe_index(0);
+                cell_volume->set_active_fe_index(0);
+            }
+            else if (cell_is_in_hydrogel_domain(cell_hp))
+            {
+                cell_hp->set_active_fe_index(1);
+                cell_volume->set_active_fe_index(1);
+            }
+            else
+                    Assert(false, ExcNotImplemented());
+        }
       }
   }
 
-    //need to modify
   template <int dim>
   void
   FluidStructureProblem<dim>::make_boundary_constraints_hp(const IndexSet &hp_relevant_set)
@@ -1151,7 +1102,6 @@ namespace HP_ALE
     DoFTools::make_hanging_node_constraints(dof_handler, constraints_boundary);
     DoFTools::make_hanging_node_constraints(dof_handler,
                                             constraints_hp_nonzero);
-
     switch (test_case)
       {
           case TestCase::case_1:
@@ -2343,7 +2293,6 @@ namespace HP_ALE
         default:
           Assert(false, ExcNotImplemented());
       }
-
     constraints_boundary.close();
     constraints_hp_nonzero.close();
   }
@@ -2356,8 +2305,8 @@ namespace HP_ALE
     set_active_fe_indices();
     {
       volume_dof_handler.distribute_dofs(volume_fe_collection);
-        IndexSet volume_locally_owned_dofs = volume_dof_handler.locally_owned_dofs();
-        IndexSet volume_locally_relevant_dofs =
+      volume_locally_owned_dofs = volume_dof_handler.locally_owned_dofs();
+      volume_locally_relevant_dofs =
                 DoFTools::extract_locally_relevant_dofs(volume_dof_handler);
 
       // volume fraction constraints
@@ -2367,42 +2316,41 @@ namespace HP_ALE
       constraints_volume.close();
 
       DynamicSparsityPattern sp(volume_locally_relevant_dofs);
-
       DoFTools::make_sparsity_pattern(volume_dof_handler,
                                       sp,
                                       constraints_volume,
                                       /*keep_constrained_dofs = */ false);
-        SparsityTools::distribute_sparsity_pattern(sp,
+      SparsityTools::distribute_sparsity_pattern(sp,
                                                    volume_locally_owned_dofs,
                                                    mpi_communicator,
                                                    volume_locally_relevant_dofs);
 
-        volume_system_matrix.reinit(volume_locally_owned_dofs,
+      volume_system_matrix.reinit(volume_locally_owned_dofs,
                                     volume_locally_owned_dofs,
                                     sp,
                                     mpi_communicator);
-        volume_system_rhs.reinit(volume_locally_owned_dofs, mpi_communicator);
+      volume_system_rhs.reinit(volume_locally_owned_dofs, mpi_communicator);
 
         //volume constraints
-        /*volume_solution.reinit(volume_locally_relevant_dofs,
-                               mpi_communicator);*/
-        volume_solution.reinit(volume_locally_owned_dofs,
-                               volume_locally_relevant_dofs,
+      volume_solution.reinit(volume_locally_relevant_dofs,
                                mpi_communicator);
-        volume_old_solution.reinit(volume_solution);
+      /*volume_solution.reinit(volume_locally_owned_dofs,
+                               volume_locally_relevant_dofs,
+                               mpi_communicator);*/
+      volume_old_solution.reinit(volume_solution);
 
-        dis_volume_solution.reinit(volume_locally_owned_dofs,
+      dis_volume_solution.reinit(volume_locally_owned_dofs,
                                    mpi_communicator);
-        dis_volume_old_solution.reinit(dis_volume_solution);
-        
-        VectorTools::interpolate(*mapping_pointer,
+      dis_volume_old_solution.reinit(dis_volume_solution);
+
+      VectorTools::interpolate(*mapping_pointer,
                                  volume_dof_handler,
                                  Functions::ConstantFunction<dim>(phi_s0),
                                  dis_volume_solution);
 
-        constraints_volume.distribute(dis_volume_solution);
-        volume_solution = dis_volume_solution;
-        volume_old_solution = volume_solution;
+      constraints_volume.distribute(dis_volume_solution);
+      volume_solution = dis_volume_solution;
+      volume_old_solution = volume_solution;
     }
 
     {
@@ -2424,7 +2372,7 @@ namespace HP_ALE
             block_component[d] = 5;
         }
       for (unsigned int d = 0; d < block_component.size(); ++d)
-        std::cout << block_component[d] << " block " << std::endl;
+        pcout << block_component[d] << " block " << std::endl;
       // DoFRenumbering::component_wise(dof_handler, block_component);
 
       const std::vector<types::global_dof_index> dofs_per_block =
@@ -2437,21 +2385,24 @@ namespace HP_ALE
       const unsigned int n_P            = dofs_per_block[5];
       // const unsigned int n_phi_s = volume_dof_handler.n_dofs();
 
-      std::cout << "   Number of active cells: "
+      pcout << "   Number of active cells: "
                 << triangulation.n_active_cells() << std::endl
                 << "   Number of degrees of freedom for the system: "
-                << dof_handler.n_dofs() << std::endl
+                << dof_handler.n_locally_owned_dofs() << std::endl
                 << "(" << n_displacement << "+" << n_mesh_vel << "+" << n_vf
                 << "+" << n_p_hydrogel << "+" << n_V << "+" << n_P << ")"
                 << "   Number of degrees of freedom for the volume fraction: "
-                << volume_dof_handler.n_dofs() << std::endl;
+                << volume_dof_handler.n_locally_owned_dofs() << std::endl;
 
         hp_index_set = dof_handler.locally_owned_dofs();
         hp_relevant_set = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
-        solution.reinit(hp_index_set,
-                        hp_relevant_set,
+        solution.reinit(hp_relevant_set,
                         mpi_communicator);
+
+        /*solution.reinit(hp_index_set,
+                        hp_relevant_set,
+                        mpi_communicator);*/
         old_solution.reinit(solution);
         current_solution.reinit(solution);
         newton_update.reinit(solution);
@@ -2479,7 +2430,7 @@ namespace HP_ALE
       solution = dis_solution;
       dis_old_solution = dis_solution;
       old_solution = solution;
-      std::cout << " initial sol l2: " << solution.l2_norm() << std::endl;
+      pcout << " initial sol l2: " << solution.l2_norm() << std::endl;
     }
   }
 
@@ -2571,7 +2522,7 @@ namespace HP_ALE
               }
           }
         cell_coupling_mat.print(std::cout);
-        std::cout << "face coupling:" << std::endl;
+        pcout << "face coupling:" << std::endl;
         face_coupling_mat.print(std::cout);
       }
   }
@@ -2583,9 +2534,7 @@ namespace HP_ALE
                                                      const IndexSet &hp_relevant_set)
   {
     DynamicSparsityPattern dsp(hp_relevant_set);
-
     Table<2, DoFTools::Coupling> cell_coupling, face_coupling;
-
     const bool print_coupling_pattern = false;
     make_coupling(cell_coupling, face_coupling, print_coupling_pattern);
 
@@ -2594,23 +2543,10 @@ namespace HP_ALE
                                          cell_coupling,
                                          face_coupling);
     constraints_newton_update.condense(dsp);
-
-      sparsity_pattern.copy_from(dsp);
-
-
-      SparsityTools::distribute_sparsity_pattern(dsp,
-                                                 hp_index_set,
-                                                 mpi_communicator,
-                                                 hp_relevant_set);
-      system_matrix.reinit(hp_index_set,
-                           hp_index_set,
-                           dsp,
-                           mpi_communicator);
-
-      system_matrix.reinit(hp_index_set,
+    sparsity_pattern.copy_from(dsp);
+    system_matrix.reinit(hp_index_set,
                              sparsity_pattern,
                              mpi_communicator);
-
   }
 
 //no need to modify
@@ -2666,7 +2602,7 @@ namespace HP_ALE
             col_vals_pair.emplace_back(cols[i], entry);
             constrainted_flag[cols[i]] = true;
 #if 0
-      std::cout << " constraint(" << row << "," << cols[i] << ")=" << entry
+      pcout << " constraint(" << row << "," << cols[i] << ")=" << entry
                 << std::endl;
 #endif
           }
@@ -2768,7 +2704,7 @@ namespace HP_ALE
                             const auto nbr_face_no = cell->neighbor_of_neighbor(f);
 #if 0
                             const auto & face_center = cell->face(f)->center();
-            std::cout << " face center: " << cell->face(f)->center()
+            pcout << " face center: " << cell->face(f)->center()
                       << " norm: " << face_center.norm()
                       << " face no  = " << f << " nbr face = " << nbr_face_no
                       << std::endl;
@@ -2898,7 +2834,7 @@ namespace HP_ALE
                                 // stokes:
                                 if (add_entries)
                                 {
-                                    //                std::cout<<" fn:
+                                    //                pcout<<" fn:
                                     //                "<<normal_v<<std::endl;
 
                                     add_interface_constraints(
@@ -3075,7 +3011,7 @@ namespace HP_ALE
   void
   FluidStructureProblem<dim>::assemble_volume_system_workstream()
   {
-    std::cout << " assembling volume...";
+    pcout << " assembling volume...";
     volume_system_matrix = 0;
     volume_system_rhs    = 0;
       using CellFilter =
@@ -3128,20 +3064,20 @@ namespace HP_ALE
       volume_system_rhs.compress(VectorOperation::add);
 #ifdef DEBUG_TIMING
     timer.stop();
-    int old_precision = std::cout.precision();
-    std::cout << "  time elapsed in parallel assemble_system_ch ="
+    int old_precision = pcout.precision();
+    pcout << "  time elapsed in parallel assemble_system_ch ="
               << std::setprecision(3) << timer() << "[CPU];"
               << timer.wall_time() << "[Wall]" << std::endl;
-    std::cout.precision(old_precision);
+    pcout.precision(old_precision);
 #endif
-    std::cout << " done!" << std::endl;
+    pcout << " done!" << std::endl;
   }
 //no need to modify
   template <int dim>
   void
   FluidStructureProblem<dim>::solve_volume()
   {
-    std::cout << " solving volume..." << std::endl;
+    pcout << " solving volume..." << std::endl;
     //SparseDirectUMFPACK A_direct;
     //A_direct.initialize(volume_system_matrix);
     //A_direct.vmult(volume_solution, volume_system_rhs);
@@ -3161,8 +3097,8 @@ namespace HP_ALE
         *it = std::min((*it_old) * (std::exp(*it)), 0.99);
       }*/
     constraints_volume.distribute(dis_volume_solution);
-      volume_solution = dis_volume_solution;
-    std::cout << " done!" << std::endl;
+    volume_solution = dis_volume_solution;
+    pcout << " done!" << std::endl;
   }
 
   template <int dim>
@@ -3229,7 +3165,7 @@ namespace HP_ALE
 
     if (cell_is_in_fluid_domain(cell_hp))
       {
-        // std::cout<<"assembling stokes domain..."<<std::endl;
+        // pcout<<"assembling stokes domain..."<<std::endl;
         Assert(dofs_per_cell == stokes_dofs_per_cell, ExcInternalError());
 
         // grad u(gradients of mesh displacement)
@@ -3353,7 +3289,7 @@ namespace HP_ALE
 
     else /*(cell_is_in_hydrogel_domain)*/
       {
-        // std::cout<<"assembling hydrogel domain...\n";
+        // pcout<<"assembling hydrogel domain...\n";
         // same as in the stokes domain
         Assert(dofs_per_cell == hydrogel_dofs_per_cell, ExcInternalError());
         // grad u(gradients of mesh displacement)
@@ -3412,7 +3348,7 @@ namespace HP_ALE
             //const auto &x_q = fe_values.quadrature_point(q);
             //mu_s=mu_s_value.value(x_q);
             //lambda_s=mu_s;
-            //std::cout<<x_q<<"  "<<mu_s <<std::endl;
+            //pcout<<x_q<<"  "<<mu_s <<std::endl;
             // extract shape functions first
             for (unsigned int k = 0; k < dofs_per_cell; ++k)
               {
@@ -3590,7 +3526,7 @@ namespace HP_ALE
                 if (neighbor->level() == cell_hp->level() &&
                     !neighbor->has_children())
                   {
-                    // std::cout<<"assembling interface terms...";
+                    // pcout<<"assembling interface terms...";
                     copy_data.assemble_interface = true;
                     scratch.hydrogel_fe_face_values.reinit(cell_hp, f);
                     scratch.stokes_fe_face_values.reinit(
@@ -3839,7 +3775,7 @@ namespace HP_ALE
     const PerTaskData &copy_data,
     const bool         update_matrix)
   {
-    // std::cout << " copier " << std::endl;
+    //pcout << " copier " << std::endl;
     if (update_matrix)
       {
         constraints_newton_update.distribute_local_to_global(
@@ -3989,16 +3925,16 @@ namespace HP_ALE
       std::ofstream out ("system_matrix.gnuplot");
       matrix_out.build_patches (system_matrix, "system_matrix");
       matrix_out.write_gnuplot (out);
-      std::cout << "Number of non-zero elements: " << system_matrix.n_nonzero_elements() << std::endl;
+      pcout << "Number of non-zero elements: " << system_matrix.n_nonzero_elements() << std::endl;
 
       
 #ifdef DEBUG_TIMING
     timer.stop();
-    int old_precision = std::cout.precision();
-    std::cout << "  time elapsed in parallel assemble_system_ch ="
+    int old_precision = pcout.precision();
+    pcout << "  time elapsed in parallel assemble_system_ch ="
               << std::setprecision(3) << timer() << "[CPU];"
               << timer.wall_time() << "[Wall]" << std::endl;
-    std::cout.precision(old_precision);
+    pcout.precision(old_precision);
 #endif
   }
 
@@ -4007,7 +3943,7 @@ namespace HP_ALE
   void
   FluidStructureProblem<dim>::newton_iteration()
   {
-    std::cout << " newton iteration... " << std::endl;
+    pcout << " newton iteration... " << std::endl;
       
       MatrixOut matrix_out;
       std::ofstream out ("system_matrix.vtk");
@@ -4036,10 +3972,10 @@ namespace HP_ALE
     double alpha_0, alpha_2, alpha_3, alpha_final;
     double h1, h2, h3; */
     
-    std::cout << " initial residual = " << residual_hp << std::endl;
+    pcout << " initial residual = " << residual_hp << std::endl;
     if (residual_hp<tol)
     {
-      std::cout<<"Simulation has converged!"<<std::endl;
+      pcout<<"Simulation has converged!"<<std::endl;
       abort();   
     }
     //SparseDirectUMFPACK matrix_direct;
@@ -4059,7 +3995,7 @@ namespace HP_ALE
           dis_current_solution += dis_newton_update;
           current_solution = dis_current_solution;
           residual_hp = system_rhs.l2_norm();
-          std::cout << " k= " << iteration << " residual = " << residual_hp
+          pcout << " k= " << iteration << " residual = " << residual_hp
                     << std::endl;
 
           iteration++;
@@ -4092,7 +4028,7 @@ namespace HP_ALE
           du_k = newton_update;
           if (alpha_3<alpha_min)
           {
-            std::cout<<"Newton Iteration is UNCOPELED!"<<std::endl;
+            pcout<<"Newton Iteration is UNCOPELED!"<<std::endl;
             abort();
           }
         }
@@ -4148,14 +4084,14 @@ namespace HP_ALE
           du_k *= alpha_final;
           current_solution += du_k;
           residual_hp=g_final;
-          std::cout << " k= " << iteration << " residual = " << g_final
+          pcout << " k= " << iteration << " residual = " << g_final
                     << " alpha= " << alpha_final
                   << std::endl;
         
         iteration++;*/
       }
     solution = current_solution;
-    std::cout << " newton iteration done " << std::endl;
+    pcout << " newton iteration done " << std::endl;
   }
 
   //no need to modify
@@ -4222,8 +4158,6 @@ namespace HP_ALE
       volume_dof_handler,
       volume_solution,
       volume_names,
-      //                             DataOut<dim,
-      //                             DoFHandler<dim>>::type_dof_data,
       volume_data_component_interpretation);
     data_out.build_patches();
 
@@ -4309,8 +4243,6 @@ namespace HP_ALE
     set_interface_dofs_flag(interface_dofs_flag);
     output_results(0);
 
-    print_mesh_info(triangulation, "grid-1.vtu");
-
     uint         step       = 0;
     double       time       = 0.;
     const double final_time = 20.0;//20000. * static_cast<double>(time_step);
@@ -4323,7 +4255,7 @@ namespace HP_ALE
     do
       {
         // compute time step?
-        std::cout << "\n step: " << step << " time: " << time << std::endl;
+        pcout << "\n step: " << step << " time: " << time << std::endl;
         {
           assemble_volume_system_workstream();
           solve_volume();
