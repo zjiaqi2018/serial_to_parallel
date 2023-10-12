@@ -802,7 +802,7 @@ namespace HP_ALE
               }
 
               triangulation.set_manifold (1, manifold);
-              
+
 
               // set material id:
               for (const auto &cell : dof_handler.active_cell_iterators())
@@ -1000,10 +1000,9 @@ namespace HP_ALE
           {
               GridIn<2> gridin;
               gridin.attach_triangulation(triangulation);
-              std::ifstream f("/Users/lexlee/Downloads/serial_to_parallel-main/simplemesh.msh");
+              std::ifstream f("/home/lexlee/Downloads/serial_to_parallel-main/example.msh");
               gridin.read_msh(f);
 
-
               // set material id:
               for (const auto &cell : dof_handler.active_cell_iterators())
               {
@@ -1013,18 +1012,6 @@ namespace HP_ALE
                       cell->set_material_id(fluid_domain_id);
               }
               triangulation.refine_global(n_refinement);
-
-
-              // set material id:
-              for (const auto &cell : dof_handler.active_cell_iterators())
-              {
-                  if (cell->material_id() == 1)
-                      cell->set_material_id(hydrogel_domain_id);
-                  else
-                      cell->set_material_id(fluid_domain_id);
-              }
-              triangulation.refine_global(n_refinement);
-
 
               break;
           }
@@ -2332,11 +2319,11 @@ namespace HP_ALE
       volume_system_rhs.reinit(volume_locally_owned_dofs, mpi_communicator);
 
         //volume constraints
-      volume_solution.reinit(volume_locally_relevant_dofs,
-                               mpi_communicator);
-      /*volume_solution.reinit(volume_locally_owned_dofs,
-                               volume_locally_relevant_dofs,
+      /*volume_solution.reinit(volume_locally_relevant_dofs,
                                mpi_communicator);*/
+      volume_solution.reinit(volume_locally_owned_dofs,
+                               volume_locally_relevant_dofs,
+                               mpi_communicator);
       volume_old_solution.reinit(volume_solution);
 
       dis_volume_solution.reinit(volume_locally_owned_dofs,
@@ -2350,6 +2337,7 @@ namespace HP_ALE
 
       constraints_volume.distribute(dis_volume_solution);
       volume_solution = dis_volume_solution;
+      dis_volume_old_solution = dis_volume_solution;
       volume_old_solution = volume_solution;
     }
 
@@ -2397,12 +2385,12 @@ namespace HP_ALE
         hp_index_set = dof_handler.locally_owned_dofs();
         hp_relevant_set = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
-        solution.reinit(hp_relevant_set,
-                        mpi_communicator);
-
-        /*solution.reinit(hp_index_set,
-                        hp_relevant_set,
+        /*solution.reinit(hp_relevant_set,
                         mpi_communicator);*/
+
+        solution.reinit(hp_index_set,
+                        hp_relevant_set,
+                        mpi_communicator);
         old_solution.reinit(solution);
         current_solution.reinit(solution);
         newton_update.reinit(solution);
@@ -2620,13 +2608,16 @@ namespace HP_ALE
     flag.resize(dof_handler.n_locally_owned_dofs(), 1);
     const unsigned int hydrogel_dofs_per_cell = hydrogel_fe.dofs_per_cell;
     for (const auto &cell : dof_handler.active_cell_iterators())
-      if (cell_is_in_hydrogel_domain(cell))
+        if (cell->is_locally_owned())
         {
-          std::vector<types::global_dof_index> local_dof_indices(
-            hydrogel_dofs_per_cell);
-          cell->get_dof_indices(local_dof_indices);
-          for (unsigned int i = 0; i < hydrogel_dofs_per_cell; ++i)
-            flag[local_dof_indices[i]] = 0;
+            if (cell_is_in_hydrogel_domain(cell))
+            {
+                std::vector<types::global_dof_index> local_dof_indices(
+                        hydrogel_dofs_per_cell);
+                cell->get_dof_indices(local_dof_indices);
+                for (unsigned int i = 0; i < hydrogel_dofs_per_cell; ++i)
+                    flag[local_dof_indices[i]] = 0;
+            }
         }
   }
 
@@ -2679,213 +2670,217 @@ namespace HP_ALE
 
         // copy from step 46
         for (const auto &cell : dof_handler.active_cell_iterators())
-            if (cell_is_in_fluid_domain(cell))
-                for (unsigned int f = 0; f < GeometryInfo<dim>::faces_per_cell;
-                     ++f) // f : face #
-                    if (!cell->at_boundary(f))
-                    {
-                        bool face_is_on_interface = false;
-                        if ((cell->neighbor(f)->has_children() == false) &&
-                            (cell_is_in_hydrogel_domain(cell->neighbor(f))))
-                            face_is_on_interface = true;
-                        else if (cell->neighbor(f)->has_children() == true)
+            if (cell->is_locally_owned())
+            {
+                if (cell_is_in_fluid_domain(cell))
+                    for (unsigned int f = 0; f < GeometryInfo<dim>::faces_per_cell;
+                         ++f) // f : face #
+                        if (!cell->at_boundary(f))
                         {
-                            for (unsigned int sf = 0; sf < cell->face(f)->n_children();
-                                 ++sf)
-                                if (cell_is_in_hydrogel_domain(
-                                        cell->neighbor_child_on_subface(f, sf)))
-                                {
-                                    face_is_on_interface = true;
-                                    break;
-                                }
-                        }
-                        if (face_is_on_interface)
-                        {
-                            const auto nbr_face_no = cell->neighbor_of_neighbor(f);
+                            bool face_is_on_interface = false;
+                            if ((cell->neighbor(f)->has_children() == false) &&
+                                (cell_is_in_hydrogel_domain(cell->neighbor(f))))
+                                face_is_on_interface = true;
+                            else if (cell->neighbor(f)->has_children() == true)
+                            {
+                                for (unsigned int sf = 0; sf < cell->face(f)->n_children();
+                                     ++sf)
+                                    if (cell_is_in_hydrogel_domain(
+                                            cell->neighbor_child_on_subface(f, sf)))
+                                    {
+                                        face_is_on_interface = true;
+                                        break;
+                                    }
+                            }
+                            if (face_is_on_interface)
+                            {
+                                const auto nbr_face_no = cell->neighbor_of_neighbor(f);
 #if 0
-                            const auto & face_center = cell->face(f)->center();
+                                const auto & face_center = cell->face(f)->center();
             pcout << " face center: " << cell->face(f)->center()
                       << " norm: " << face_center.norm()
                       << " face no  = " << f << " nbr face = " << nbr_face_no
                       << std::endl;
 #endif
-                            stokes_fe_face_values.reinit(cell, f);
-                            const auto &neighbor = cell->neighbor(f);
+                                stokes_fe_face_values.reinit(cell, f);
+                                const auto &neighbor = cell->neighbor(f);
 
-                            // get phi_s
-                            typename DoFHandler<dim>::active_cell_iterator
-                                    neighbor_cell_volume(&triangulation,
-                                                         neighbor->level(),
-                                                         neighbor->index(),
-                                                         &volume_dof_handler);
-                            volume_fe_face_values.reinit(neighbor_cell_volume,
-                                                         nbr_face_no);
-                            volume_fe_face_values.get_function_values(volume_solution,
-                                                                      volume_s_face);
+                                // get phi_s
+                                typename DoFHandler<dim>::active_cell_iterator
+                                        neighbor_cell_volume(&triangulation,
+                                                             neighbor->level(),
+                                                             neighbor->index(),
+                                                             &volume_dof_handler);
+                                volume_fe_face_values.reinit(neighbor_cell_volume,
+                                                             nbr_face_no);
+                                volume_fe_face_values.get_function_values(volume_solution,
+                                                                          volume_s_face);
 
-                            hydrogel_fe_face_values.reinit(neighbor, nbr_face_no);
+                                hydrogel_fe_face_values.reinit(neighbor, nbr_face_no);
 
-                            // get normal vectors
-                            const std::vector<Tensor<1, dim>> &normal_vectors =
-                                    hydrogel_fe_face_values.get_normal_vectors();
+                                // get normal vectors
+                                const std::vector<Tensor<1, dim>> &normal_vectors =
+                                        hydrogel_fe_face_values.get_normal_vectors();
 
-                            std::vector<Tensor<2, dim>> grad_u_face(n_q_face);
-                            hydrogel_fe_face_values[extractor_displacement]
-                                    .get_function_gradients(solution, grad_u_face);
+                                std::vector<Tensor<2, dim>> grad_u_face(n_q_face);
+                                hydrogel_fe_face_values[extractor_displacement]
+                                        .get_function_gradients(solution, grad_u_face);
 
-                            // the following two have repeated support points
+                                // the following two have repeated support points
 
-                            // The order of points in the array matches that returned by
-                            // the cell->face(face)->get_dof_indices function.
-                            const std::vector<Point<dim - 1>>
-                                    &stokes_unit_support_points =
-                                    stokes_fe.get_unit_face_support_points();
-                            const std::vector<Point<dim - 1>>
-                                    &elasticity_unit_support_points =
-                                    hydrogel_fe.get_unit_face_support_points();
+                                // The order of points in the array matches that returned by
+                                // the cell->face(face)->get_dof_indices function.
+                                const std::vector<Point<dim - 1>>
+                                        &stokes_unit_support_points =
+                                        stokes_fe.get_unit_face_support_points();
+                                const std::vector<Point<dim - 1>>
+                                        &elasticity_unit_support_points =
+                                        hydrogel_fe.get_unit_face_support_points();
 
-                            const std::vector<Point<dim>> &stokes_physical_face_points =
-                                    get_physical_face_points(cell,
-                                                             f,
-                                                             stokes_unit_support_points);
-                            const std::vector<Point<dim>> &hydrogel_physical_face_points =
-                                    get_physical_face_points(neighbor,
-                                                             nbr_face_no,
-                                                             elasticity_unit_support_points);
-                            const std::vector<Point<dim>> &
-                                    generalized_physical_face_points = get_physical_face_points(
-                                            cell, f, generalized_unit_face_support_points);
+                                const std::vector<Point<dim>> &stokes_physical_face_points =
+                                        get_physical_face_points(cell,
+                                                                 f,
+                                                                 stokes_unit_support_points);
+                                const std::vector<Point<dim>> &hydrogel_physical_face_points =
+                                        get_physical_face_points(neighbor,
+                                                                 nbr_face_no,
+                                                                 elasticity_unit_support_points);
+                                const std::vector<Point<dim>> &
+                                        generalized_physical_face_points = get_physical_face_points(
+                                                cell, f, generalized_unit_face_support_points);
 
-                            // //pair the global indices and the physical support points
-                            // std::vector<std::pair<unsigned int, Point<dim>>>
-                            // st_global_id_to_phy_sp; std::vector<std::pair<unsigned int,
-                            // Point<dim>>> el_global_id_to_phy_sp;
+                                // //pair the global indices and the physical support points
+                                // std::vector<std::pair<unsigned int, Point<dim>>>
+                                // st_global_id_to_phy_sp; std::vector<std::pair<unsigned int,
+                                // Point<dim>>> el_global_id_to_phy_sp;
 
-                            // 0 for stokes, 1 for elasticity
-                            // determined by the function set_active_fe_indices() in this
-                            // class
-                            neighbor->face(cell->neighbor_of_neighbor(f))
-                                    ->get_dof_indices(hydrogel_face_dof_indices, 1);
-                            cell->face(f)->get_dof_indices(stokes_face_dof_indices, 0);
+                                // 0 for stokes, 1 for elasticity
+                                // determined by the function set_active_fe_indices() in this
+                                // class
+                                neighbor->face(cell->neighbor_of_neighbor(f))
+                                        ->get_dof_indices(hydrogel_face_dof_indices, 1);
+                                cell->face(f)->get_dof_indices(stokes_face_dof_indices, 0);
 
-                            // generalized support points are also the quadrature points
-                            for (unsigned int k = 0;
-                                 k < generalized_unit_face_support_points.size();
-                                 ++k)
-                            {
-                                // add one line at each generalized support point
-                                // make sure diagonal is nonzero
-
-                                // determin which line to add at this support point:
-                                // the comp correspond to the max entry of the normal
-                                // vector
-
-                                unsigned int   comp = 0;
-
-                                Tensor<2, dim> deformation_F(identity_tensor);
-                                deformation_F += grad_u_face[k];
-                                const Tensor<2, dim> F_T =
-                                        transpose(deformation_F);                 // F^T
-                                const Tensor<2, dim> inv_F_T = invert(F_T); // F^{-T}
-                                const auto           fn = inv_F_T * normal_vectors[k];
-                                const auto           magnitude_m = fn.norm();
-                                const Tensor<1, dim> normal_v    = fn / magnitude_m;
+                                // generalized support points are also the quadrature points
+                                for (unsigned int k = 0;
+                                     k < generalized_unit_face_support_points.size();
+                                     ++k)
                                 {
-                                    double tmp = 1e-15;
-                                    for (unsigned int d = 0; d < dim; ++d)
+                                    // add one line at each generalized support point
+                                    // make sure diagonal is nonzero
+
+                                    // determin which line to add at this support point:
+                                    // the comp correspond to the max entry of the normal
+                                    // vector
+
+                                    unsigned int   comp = 0;
+
+                                    Tensor<2, dim> deformation_F(identity_tensor);
+                                    deformation_F += grad_u_face[k];
+                                    const Tensor<2, dim> F_T =
+                                            transpose(deformation_F);                 // F^T
+                                    const Tensor<2, dim> inv_F_T = invert(F_T); // F^{-T}
+                                    const auto           fn = inv_F_T * normal_vectors[k];
+                                    const auto           magnitude_m = fn.norm();
+                                    const Tensor<1, dim> normal_v    = fn / magnitude_m;
                                     {
-                                        if (std::fabs(normal_v[d]) > tmp)
+                                        double tmp = 1e-15;
+                                        for (unsigned int d = 0; d < dim; ++d)
                                         {
-                                            comp = d;
-                                            tmp  = std::fabs(normal_v[d]);
+                                            if (std::fabs(normal_v[d]) > tmp)
+                                            {
+                                                comp = d;
+                                                tmp  = std::fabs(normal_v[d]);
+                                            }
                                         }
                                     }
-                                }
 
-                                // add line first, note that we just need one line on each
-                                // support point
-                                bool         add_entries = false;
-                                unsigned int add_line_id = st_dofs_per_face;
-                                for (unsigned int i = 0; i < st_dofs_per_face; ++i)
-                                {
-                                    if (stokes_fe.face_system_to_component_index(i)
-                                                .first == comp + extractor_stokes_velocity
-                                            .first_vector_component &&
-                                        generalized_physical_face_points[k].distance(
-                                                stokes_physical_face_points[i]) < 1e-10)
+                                    // add line first, note that we just need one line on each
+                                    // support point
+                                    bool         add_entries = false;
+                                    unsigned int add_line_id = st_dofs_per_face;
+                                    for (unsigned int i = 0; i < st_dofs_per_face; ++i)
                                     {
-                                        if (!constrainted_flag
-                                        [stokes_face_dof_indices[i]])
+                                        if (stokes_fe.face_system_to_component_index(i)
+                                                    .first == comp + extractor_stokes_velocity
+                                                .first_vector_component &&
+                                            generalized_physical_face_points[k].distance(
+                                                    stokes_physical_face_points[i]) < 1e-10)
                                         {
-                                            constraints_flux.add_line(
-                                                    stokes_face_dof_indices[i]);
-                                            add_line_id = i;
-                                            add_entries = true;
-                                            constrainted_flag
-                                            [stokes_face_dof_indices[add_line_id]] =
-                                                    true;
-                                            break;
+                                            if (!constrainted_flag
+                                            [stokes_face_dof_indices[i]])
+                                            {
+                                                constraints_flux.add_line(
+                                                        stokes_face_dof_indices[i]);
+                                                add_line_id = i;
+                                                add_entries = true;
+                                                constrainted_flag
+                                                [stokes_face_dof_indices[add_line_id]] =
+                                                        true;
+                                                break;
+                                            }
                                         }
                                     }
-                                }
-                                //              AssertIndexRange(add_line_id,
-                                //              st_dofs_per_face);
-                                // add entries
-                                // stokes:
-                                if (add_entries)
-                                {
-                                    //                pcout<<" fn:
-                                    //                "<<normal_v<<std::endl;
+                                    //              AssertIndexRange(add_line_id,
+                                    //              st_dofs_per_face);
+                                    // add entries
+                                    // stokes:
+                                    if (add_entries)
+                                    {
+                                        //                pcout<<" fn:
+                                        //                "<<normal_v<<std::endl;
 
-                                    add_interface_constraints(
-                                            stokes_fe,
-                                            stokes_face_dof_indices[add_line_id],
-                                            stokes_face_dof_indices,
-                                            normal_v, /*normal vector at the sp*/
-                                            -1.,      /*coefficient*/
-                                            comp,     /*comp of add_line*/
-                                            extractor_stokes_velocity
-                                                    .first_vector_component /*starting comp*/,
-                                            dim /*number of comp*/,
-                                            generalized_physical_face_points
-                                            [k] /*support point correspond to this dof*/,
-                                            stokes_physical_face_points,
-                                            constraints_flux);
+                                        add_interface_constraints(
+                                                stokes_fe,
+                                                stokes_face_dof_indices[add_line_id],
+                                                stokes_face_dof_indices,
+                                                normal_v, /*normal vector at the sp*/
+                                                -1.,      /*coefficient*/
+                                                comp,     /*comp of add_line*/
+                                                extractor_stokes_velocity
+                                                        .first_vector_component /*starting comp*/,
+                                                dim /*number of comp*/,
+                                                generalized_physical_face_points
+                                                [k] /*support point correspond to this dof*/,
+                                                stokes_physical_face_points,
+                                                constraints_flux);
 
-                                    add_interface_constraints(
-                                            hydrogel_fe,
-                                            stokes_face_dof_indices[add_line_id],
-                                            hydrogel_face_dof_indices,
-                                            normal_v,                /*normal vector at the sp*/
-                                            (1. - volume_s_face[k]), /*coefficient*/
-                                            comp,
-                                            extractor_hydrogel_velocity
-                                                    .first_vector_component /*starting comp*/,
-                                            dim /*number of comp*/,
-                                            generalized_physical_face_points
-                                            [k] /*support point correspond to this dof*/,
-                                            hydrogel_physical_face_points,
-                                            constraints_flux);
+                                        add_interface_constraints(
+                                                hydrogel_fe,
+                                                stokes_face_dof_indices[add_line_id],
+                                                hydrogel_face_dof_indices,
+                                                normal_v,                /*normal vector at the sp*/
+                                                (1. - volume_s_face[k]), /*coefficient*/
+                                                comp,
+                                                extractor_hydrogel_velocity
+                                                        .first_vector_component /*starting comp*/,
+                                                dim /*number of comp*/,
+                                                generalized_physical_face_points
+                                                [k] /*support point correspond to this dof*/,
+                                                hydrogel_physical_face_points,
+                                                constraints_flux);
 
-                                    add_interface_constraints(
-                                            hydrogel_fe,
-                                            stokes_face_dof_indices[add_line_id],
-                                            hydrogel_face_dof_indices,
-                                            normal_v,         /*normal vector at the sp*/
-                                            volume_s_face[k], /*coefficient*/
-                                            comp,
-                                            extractor_mesh_velocity
-                                                    .first_vector_component /*starting comp*/,
-                                            dim /*number of comp*/,
-                                            generalized_physical_face_points
-                                            [k] /*support point correspond to this dof*/,
-                                            hydrogel_physical_face_points,
-                                            constraints_flux);
-                                } // if add entries
+                                        add_interface_constraints(
+                                                hydrogel_fe,
+                                                stokes_face_dof_indices[add_line_id],
+                                                hydrogel_face_dof_indices,
+                                                normal_v,         /*normal vector at the sp*/
+                                                volume_s_face[k], /*coefficient*/
+                                                comp,
+                                                extractor_mesh_velocity
+                                                        .first_vector_component /*starting comp*/,
+                                                dim /*number of comp*/,
+                                                generalized_physical_face_points
+                                                [k] /*support point correspond to this dof*/,
+                                                hydrogel_physical_face_points,
+                                                constraints_flux);
+                                    } // if add entries
 
-                            } // q loop
+                                } // q loop
+                            }
                         }
-                    }
+            }
+
     }
 
     //no need to modify
@@ -3043,13 +3038,13 @@ namespace HP_ALE
     PerTaskData cp;
 
     auto worker =
-      [this](const typename DoFHandler<dim>::active_cell_iterator &cell,
+      [=](const typename DoFHandler<dim>::active_cell_iterator &cell,
           ScratchData &                                         scratch,
           PerTaskData &                                         copy_data) {
-        this->local_assemble_volume(cell, scratch, copy_data);
+        local_assemble_volume(cell, scratch, copy_data);
       };
-    auto copier = [this](const PerTaskData &copy_data) {
-      this->copy_local_to_global_volume(copy_data);
+    auto copier = [=](const PerTaskData &copy_data) {
+       copy_local_to_global_volume(copy_data);
     };
 
       WorkStream::run(CellFilter(IteratorFilters::LocallyOwnedCell(),
@@ -3078,26 +3073,11 @@ namespace HP_ALE
   FluidStructureProblem<dim>::solve_volume()
   {
     pcout << " solving volume..." << std::endl;
-    //SparseDirectUMFPACK A_direct;
-    //A_direct.initialize(volume_system_matrix);
-    //A_direct.vmult(volume_solution, volume_system_rhs);
-
       SolverControl                    solver_control;
       PETScWrappers::SparseDirectMUMPS solver(solver_control, mpi_communicator);
       solver.solve(volume_system_matrix, dis_volume_solution, volume_system_rhs);
       constraints_volume.distribute(dis_volume_solution);
       volume_solution = dis_volume_solution;
-
-    // since we are solving for ln(phi_n+1/phi_n-1) = volume_solution,
-    // we need to reconstruct phi_n+1
-    /*auto it_old = volume_old_solution.begin();
-    for (auto it = volume_solution.begin(); it != volume_solution.end();
-         ++it, ++it_old)
-      {
-        *it = std::min((*it_old) * (std::exp(*it)), 0.99);
-      }*/
-    constraints_volume.distribute(dis_volume_solution);
-    volume_solution = dis_volume_solution;
     pcout << " done!" << std::endl;
   }
 
@@ -3920,22 +3900,6 @@ namespace HP_ALE
 
       system_matrix.compress(VectorOperation::add);
       system_rhs.compress(VectorOperation::add);
-      
-      MatrixOut matrix_out;
-      std::ofstream out ("system_matrix.gnuplot");
-      matrix_out.build_patches (system_matrix, "system_matrix");
-      matrix_out.write_gnuplot (out);
-      pcout << "Number of non-zero elements: " << system_matrix.n_nonzero_elements() << std::endl;
-
-      
-#ifdef DEBUG_TIMING
-    timer.stop();
-    int old_precision = pcout.precision();
-    pcout << "  time elapsed in parallel assemble_system_ch ="
-              << std::setprecision(3) << timer() << "[CPU];"
-              << timer.wall_time() << "[Wall]" << std::endl;
-    pcout.precision(old_precision);
-#endif
   }
 
 //change this later for parallel computing
@@ -3944,19 +3908,8 @@ namespace HP_ALE
   FluidStructureProblem<dim>::newton_iteration()
   {
     pcout << " newton iteration... " << std::endl;
-      
-      MatrixOut matrix_out;
-      std::ofstream out ("system_matrix.vtk");
-      matrix_out.build_patches (system_matrix, "system_matrix");
-      matrix_out.write_vtk (out);
-
-      /*std::ofstream out ("system_matrix.gnuplot");
-      matrix_out.build_patches (system_matrix, "system_matrix");
-      matrix_out.write_gnuplot (out);*/
-
-    
     // set the Newton iterate v* to v_n
-    //current_solution = old_solution;
+    current_solution = old_solution;
     dis_current_solution = dis_old_solution;
     // constrain v* using the flux constraint from phis_n+1
     constraints_hp.distribute(dis_current_solution);
@@ -3968,28 +3921,21 @@ namespace HP_ALE
     const double       alpha_min     = 0.01;
     assemble_system_workstream(false);
     double residual_hp = system_rhs.l2_norm();
-    /*double g1,g2,g3,g0,g_final; // the l2 norm for the rhs u_k
-    double alpha_0, alpha_2, alpha_3, alpha_final;
-    double h1, h2, h3; */
-    
+
     pcout << " initial residual = " << residual_hp << std::endl;
     if (residual_hp<tol)
     {
       pcout<<"Simulation has converged!"<<std::endl;
       abort();   
     }
-    //SparseDirectUMFPACK matrix_direct;
+
       SolverControl                    solver_control;
       PETScWrappers::SparseDirectMUMPS solver(solver_control, mpi_communicator);
-
-    // current_solution = solution;
     while (iteration < max_iteration && residual_hp > tol)
       {
-          assemble_system_workstream(
-                  true /*assemble matrix*/); // get system rhs();
-          //    system_matrix.print(std::cout, false, true);
+          assemble_system_workstream(true);
 
-          dis_newton_update = system_rhs;
+          dis_newton_update = dis_current_solution;
           solver.solve(system_matrix, dis_newton_update, system_rhs);
           constraints_newton_update.distribute(dis_newton_update);
           dis_current_solution += dis_newton_update;
@@ -3997,99 +3943,9 @@ namespace HP_ALE
           residual_hp = system_rhs.l2_norm();
           pcout << " k= " << iteration << " residual = " << residual_hp
                     << std::endl;
-
           iteration++;
-        /*alpha_3 = 1;
-        PETScWrappers::MPI::Vector u_k = dis_current_solution;
-        assemble_system_workstream(true); // true: assemble matrix
-        matrix_direct.initialize(system_matrix);
-        g1 = system_rhs.l2_norm();
-        newton_update = system_rhs;
-        // solve linear system 
-        matrix_direct.solve(newton_update);
-        // update the constraints for Newton iteration
-        constraints_newton_update.distribute(newton_update);
-        Vector<double> du_k = newton_update;
-        current_solution += newton_update;
-        assemble_system_workstream(true); 
-        g3 = system_rhs.l2_norm();
-        alpha_final = 1;
-        g_final = g3;
-        if (g3>g1)
-        {
-        while(g3>g1)
-        {
-          alpha_3 = alpha_3/2;
-          current_solution = u_k;
-          du_k *= alpha_3;
-          current_solution += du_k;
-          assemble_system_workstream(false); 
-          g3 = system_rhs.l2_norm();
-          du_k = newton_update;
-          if (alpha_3<alpha_min)
-          {
-            pcout<<"Newton Iteration is UNCOPELED!"<<std::endl;
-            abort();
-          }
-        }
-
-          alpha_2 = alpha_3/2;
-          current_solution = u_k;
-          du_k *= alpha_2;
-          current_solution += du_k;
-          assemble_system_workstream(false); 
-          g2 = system_rhs.l2_norm();
-          du_k = newton_update;
-
-
-          h1 = (g2-g1)/alpha_2;
-          h2 = (g3-g2)/(alpha_3-alpha_2);
-          h3 = (h2-h1)/alpha_3;
-          alpha_0 = 0.5*(alpha_2 - h1/h3);
-
-          current_solution = u_k;
-          du_k *= alpha_0;
-          current_solution += du_k;
-          assemble_system_workstream(false); 
-          g0 = system_rhs.l2_norm();
-          du_k = newton_update;
-
-          alpha_final = alpha_0;
-          g_final = g0;
-          if (g2 < g0)
-          {
-            alpha_final = alpha_2;
-            g_final = g2;
-            if (g3 < g2)
-            {
-              alpha_final = alpha_3;
-              g_final = g3;
-            }
-            
-          }
-          else if (g3 < g0)
-          {
-            alpha_final = alpha_3;
-            g_final = g3;
-            if (g2 < g3)
-            {
-              alpha_final = alpha_2;
-              g_final = g2;
-            }
-            
-          }
-        }
-
-          current_solution = u_k;
-          du_k *= alpha_final;
-          current_solution += du_k;
-          residual_hp=g_final;
-          pcout << " k= " << iteration << " residual = " << g_final
-                    << " alpha= " << alpha_final
-                  << std::endl;
-        
-        iteration++;*/
       }
+    dis_solution = dis_current_solution;
     solution = current_solution;
     pcout << " newton iteration done " << std::endl;
   }
@@ -4207,7 +4063,8 @@ namespace HP_ALE
                              dis_volume_solution);
 
     constraints_volume.distribute(dis_volume_solution);
-      volume_solution = dis_volume_solution;
+    volume_solution = dis_volume_solution;
+    dis_volume_old_solution = dis_volume_solution;
     volume_old_solution = volume_solution;
   }
 
@@ -4241,7 +4098,7 @@ namespace HP_ALE
     make_grid(n_refinement);
     setup_dofs();
     set_interface_dofs_flag(interface_dofs_flag);
-    output_results(0);
+    //output_results(0);
 
     uint         step       = 0;
     double       time       = 0.;
@@ -4269,7 +4126,9 @@ namespace HP_ALE
           newton_iteration();
         }
 
+        dis_volume_old_solution = dis_volume_solution;
         volume_old_solution = volume_solution;
+        dis_old_solution = dis_solution;
         old_solution        = solution;
         ++step;
         //if (step % 1 == 0)
@@ -4287,11 +4146,11 @@ int main(int argc, char *argv[])
   try
     {
       using namespace HP_ALE;
-        Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
+        Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 32);
       const TestCase test_case = TestCase::case_6;
 
-      std::cout << "running " << enum_str[static_cast<int>(test_case)]
-                << std::endl;
+      //pcout << "running " << enum_str[static_cast<int>(test_case)]
+                //<< std::endl;
 
       FluidStructureProblem<2> flow_problem(2, 1, 2, test_case);
       flow_problem.run();
