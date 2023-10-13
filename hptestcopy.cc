@@ -1000,7 +1000,7 @@ namespace HP_ALE
           {
               GridIn<2> gridin;
               gridin.attach_triangulation(triangulation);
-              std::ifstream f("/Users/lexlee/Downloads/serial_to_parallel-main/simplemesh.msh");
+              std::ifstream f("simplemesh.msh");
               gridin.read_msh(f);
 
 
@@ -2332,7 +2332,8 @@ namespace HP_ALE
       volume_system_rhs.reinit(volume_locally_owned_dofs, mpi_communicator);
 
         //volume constraints
-      volume_solution.reinit(volume_locally_relevant_dofs,
+      volume_solution.reinit(volume_locally_owned_dofs,
+            volume_locally_relevant_dofs,
                                mpi_communicator);
       /*volume_solution.reinit(volume_locally_owned_dofs,
                                volume_locally_relevant_dofs,
@@ -2397,12 +2398,9 @@ namespace HP_ALE
         hp_index_set = dof_handler.locally_owned_dofs();
         hp_relevant_set = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
-        solution.reinit(hp_relevant_set,
-                        mpi_communicator);
-
-        /*solution.reinit(hp_index_set,
+        solution.reinit(hp_index_set,
                         hp_relevant_set,
-                        mpi_communicator);*/
+                        mpi_communicator);
         old_solution.reinit(solution);
         current_solution.reinit(solution);
         newton_update.reinit(solution);
@@ -2620,6 +2618,7 @@ namespace HP_ALE
     flag.resize(dof_handler.n_locally_owned_dofs(), 1);
     const unsigned int hydrogel_dofs_per_cell = hydrogel_fe.dofs_per_cell;
     for (const auto &cell : dof_handler.active_cell_iterators())
+    if(cell->is_locally_owned())
       if (cell_is_in_hydrogel_domain(cell))
         {
           std::vector<types::global_dof_index> local_dof_indices(

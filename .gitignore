@@ -1,0 +1,11 @@
+CMakeCache.txt
+cmake_install.cmake
+build/*
+CMakeFiles/*
+Makefile
+*.vtk
+*.dat
+*.txt
+hptestcopy
+*.gnuplot
+*.json
