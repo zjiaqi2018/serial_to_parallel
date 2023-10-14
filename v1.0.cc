@@ -2418,7 +2418,7 @@ namespace HP_ALE
       solution = dis_solution;
       dis_old_solution = dis_solution;
       old_solution = solution;
-      pcout << " initial sol l2: " << solution.l2_norm() << std::endl;
+      //pcout << " initial sol l2: " << solution.l2_norm() << std::endl;
     }
   }
 
@@ -3038,13 +3038,13 @@ namespace HP_ALE
     PerTaskData cp;
 
     auto worker =
-      [=](const typename DoFHandler<dim>::active_cell_iterator &cell,
+      [this](const typename DoFHandler<dim>::active_cell_iterator &cell,
           ScratchData &                                         scratch,
           PerTaskData &                                         copy_data) {
-        local_assemble_volume(cell, scratch, copy_data);
+        this->local_assemble_volume(cell, scratch, copy_data);
       };
-    auto copier = [=](const PerTaskData &copy_data) {
-       copy_local_to_global_volume(copy_data);
+    auto copier = [this](const PerTaskData &copy_data) {
+       this->copy_local_to_global_volume(copy_data);
     };
 
       WorkStream::run(CellFilter(IteratorFilters::LocallyOwnedCell(),
@@ -3883,13 +3883,13 @@ namespace HP_ALE
     PerTaskData cp;
 
     auto worker =
-      [=](const typename DoFHandler<dim>::active_cell_iterator &cell,
+      [this, &update_matrix = std::as_const(update_matrix)](const typename DoFHandler<dim>::active_cell_iterator &cell,
           ScratchData &                                         scratch,
           PerTaskData &                                         copy_data) {
-        local_assemble_hp(cell, scratch, copy_data, update_matrix);
+        this->local_assemble_hp(cell, scratch, copy_data, update_matrix);
       };
-    auto copier = [=](const PerTaskData &copy_data) {
-      copy_local_to_global_hp(copy_data, update_matrix);
+    auto copier = [this, &update_matrix = std::as_const(update_matrix)](const PerTaskData &copy_data) {
+      this->copy_local_to_global_hp(copy_data, update_matrix);
     };
 
       WorkStream::run(CellFilter(IteratorFilters::LocallyOwnedCell(),
@@ -4050,6 +4050,7 @@ namespace HP_ALE
     constraints_newton_update.merge(constraints_flux,
     AffineConstraints<double>::MergeConflictBehavior::right_object_wins);
     constraints_newton_update.close();
+    //pcout << " update constraints done " << std::endl;
   }
 
   // no need to modify
@@ -4104,10 +4105,11 @@ namespace HP_ALE
     double       time       = 0.;
     const double final_time = 20.0;//20000. * static_cast<double>(time_step);
 
-    std::string   fileNameBaseLsns;
+    /*std::string   fileNameBaseLsns;
     std::ofstream myfile;
     myfile.open(("output_variables" + fileNameBaseLsns + ".dat").c_str());
-    myfile << std::fixed;
+    myfile << std::fixed;*/
+    pcout << "going to do loop" << std::endl;
 
     do
       {
@@ -4122,6 +4124,7 @@ namespace HP_ALE
             update_constraints(hp_relevant_set);
             setup_hp_sparse_matrix(hp_index_set,
                                    hp_relevant_set);
+            pcout << "setup_hp_sparse_matrix" << std::endl;
           }
           newton_iteration();
         }
@@ -4136,7 +4139,7 @@ namespace HP_ALE
         time += time_step;
       }
     while (time < final_time);
-    myfile.close();
+    //myfile.close();
   }
 } // namespace HP_ALE
 
@@ -4146,7 +4149,7 @@ int main(int argc, char *argv[])
   try
     {
       using namespace HP_ALE;
-        Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 32);
+        Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, numbers::invalid_unsigned_int);
       const TestCase test_case = TestCase::case_6;
 
       //pcout << "running " << enum_str[static_cast<int>(test_case)]
