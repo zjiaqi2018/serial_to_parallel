@@ -6,208 +6,70 @@
 #include <deal.II/base/utilities.h>
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
-#include <deal.II/fe/fe_q.h>
-#include <deal.II/fe/fe_values.h>
-#include <deal.II/grid/grid_refinement.h>
-#include <deal.II/grid/tria.h>
-#include <deal.II/lac/affine_constraints.h>
-#include <deal.II/lac/dynamic_sparsity_pattern.h>
-#include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/vector.h>
+#include <deal.II/grid/tria.h>
+#include <deal.II/grid/tria_iterator.h>
+#include <deal.II/grid/grid_tools.h>
+#include <deal.II/grid/manifold_lib.h>
+#include <deal.II/grid/grid_out.h>
+#include <deal.II/grid/grid_in.h>
+#include <deal.II/grid/grid_refinement.h>
+#include <map>
+#include <deal.II/base/derivative_form.h>
+#include <deal.II/base/logstream.h>
+#include <deal.II/base/multithread_info.h>
+#include <deal.II/base/qprojector.h>
+#include <deal.II/base/work_stream.h>
+#include <deal.II/differentiation/sd/symengine_math.h>
+#include <deal.II/dofs/dof_accessor.h>
+#include <deal.II/dofs/dof_renumbering.h>
+#include <deal.II/fe/fe_nothing.h>
+#include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_system.h>
+#include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/mapping.h>
+#include <deal.II/fe/mapping_q.h>
+#include <deal.II/hp/fe_collection.h>
+#include <deal.II/lac/affine_constraints.h>
+#include <deal.II/lac/full_matrix.h>
+#include <deal.II/lac/sparse_direct.h>
+#include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/error_estimator.h>
+#include <deal.II/numerics/vector_tools.h>
+#include <fstream>
+#include <iostream>
+#include <deal.II/lac/solver_cg.h>
+#include <deal.II/lac/solver_gmres.h>
+#include <deal.II/lac/dynamic_sparsity_pattern.h>
+#include <deal.II/base/conditional_ostream.h>
+#include <deal.II/base/index_set.h>
+#include <deal.II/distributed/tria.h>
 #include <deal.II/numerics/matrix_tools.h>
 #include <deal.II/numerics/solution_transfer.h>
-#include <deal.II/numerics/vector_tools.h>
-#include <deal.II/distributed/grid_refinement.h>
-#include <deal.II/distributed/solution_transfer.h>
-#include <deal.II/distributed/tria.h>
-#include <deal.II/grid/grid_tools.h>
 #include <deal.II/lac/generic_linear_algebra.h>
-#include <deal.II/dofs/dof_accessor.h>
 #include "tests.h"
-#include <deal.II/base/conditional_ostream.h>
-#include <iostream>
-#include <deal.II/lac/solver_cg.h>
-#include <deal.II/base/index_set.h>
 #include <deal.II/lac/sparsity_tools.h>
-#include <fstream>
-#include <deal.II/lac/sparse_direct.h>
-#include <deal.II/lac/sparse_matrix.h>
-#include <deal.II/base/derivative_form.h>
-#include <deal.II/base/multithread_info.h>
-#include <deal.II/base/qprojector.h>
-#include <deal.II/base/work_stream.h>
 #include <deal.II/base/mpi.h>
-#include <deal.II/lac/solver_gmres.h>
-#include <deal.II/grid/tria_iterator.h>
-#include <deal.II/grid/manifold_lib.h>
-#include <deal.II/grid/grid_out.h>
-#include <deal.II/grid/grid_in.h>
 #include <deal.II/grid/filtered_iterator.h>
-#include <deal.II/dofs/dof_renumbering.h>
-#include <deal.II/fe/fe_nothing.h>
-#include <deal.II/fe/fe_system.h>
-#include <deal.II/fe/mapping.h>
-#include <deal.II/fe/mapping_q.h>
-#include <deal.II/hp/fe_collection.h>
 #include <string>
-#include <map>
 #include <iomanip>
-#include <deal.II/base/logstream.h>
-#include <deal.II/grid/tria_accessor.h>
-#include <deal.II/grid/grid_generator.h>
-#include <deal.II/differentiation/sd/symengine_math.h>
-#include <deal.II/fe/mapping_fe_field.h>
-#include <deal.II/fe/mapping_manifold.h>
-#include <locale>
 #include <deal.II/base/symmetric_tensor.h>
 #include <deal.II/base/data_out_base.h>
-#include <deal.II/grid/tria.h>
-#include <deal.II/lac/matrix_out.h>
-#include <deal.II/base/data_out_base.h>
-#include <deal.II/grid/tria_accessor.h>
-#include <deal.II/grid/tria_iterator.h>
-#include <deal.II/grid/grid_generator.h>
-#include <deal.II/grid/grid_tools.h>
-#include <deal.II/grid/manifold_lib.h>
-#include <deal.II/grid/grid_out.h>
-#include <deal.II/grid/grid_in.h>
-#include <deal.II/grid/grid_refinement.h>
-#include <deal.II/grid/manifold_lib.h>
-#include <map>
-#include <deal.II/base/derivative_form.h>
-#include <deal.II/base/function.h>
-#include <deal.II/base/logstream.h>
-#include <deal.II/base/multithread_info.h>
-#include <deal.II/base/qprojector.h>
-#include <deal.II/base/quadrature_lib.h>
-#include <deal.II/base/utilities.h>
-#include <deal.II/base/work_stream.h>
-#include <deal.II/differentiation/sd/symengine_math.h>
-#include <deal.II/dofs/dof_accessor.h>
-#include <deal.II/dofs/dof_renumbering.h>
-#include <deal.II/dofs/dof_tools.h>
-#include <deal.II/fe/fe_nothing.h>
-#include <deal.II/fe/fe_q.h>
-#include <deal.II/fe/fe_system.h>
-#include <deal.II/fe/fe_values.h>
-#include <deal.II/fe/mapping.h>
-#include <deal.II/fe/mapping_fe_field.h>
-#include <deal.II/fe/mapping_manifold.h>
-#include <deal.II/fe/mapping_q.h>
-#include <deal.II/hp/fe_collection.h>
-#include <deal.II/lac/affine_constraints.h>
-#include <deal.II/lac/full_matrix.h>
-#include <deal.II/lac/sparse_direct.h>
-#include <deal.II/lac/sparse_matrix.h>
-#include <deal.II/lac/vector.h>
-#include <deal.II/numerics/data_out.h>
-#include <deal.II/numerics/error_estimator.h>
-#include <deal.II/numerics/vector_tools.h>
-#include <fstream>
-#include <iostream>
-#include <deal.II/grid/tria.h>
-#include <deal.II/lac/matrix_out.h>
-#include <deal.II/base/data_out_base.h>
-#include <deal.II/grid/tria_accessor.h>
-#include <deal.II/grid/tria_iterator.h>
-#include <deal.II/grid/grid_generator.h>
-#include <deal.II/grid/grid_tools.h>
-#include <deal.II/grid/manifold_lib.h>
-#include <deal.II/grid/grid_out.h>
-#include <deal.II/grid/grid_in.h>
-#include <deal.II/grid/grid_refinement.h>
-#include <deal.II/grid/manifold_lib.h>
-#include <map>
-#include <deal.II/base/derivative_form.h>
-#include <deal.II/base/function.h>
-#include <deal.II/base/logstream.h>
-#include <deal.II/base/multithread_info.h>
-#include <deal.II/base/qprojector.h>
-#include <deal.II/base/quadrature_lib.h>
-#include <deal.II/base/utilities.h>
-#include <deal.II/base/work_stream.h>
-#include <deal.II/differentiation/sd/symengine_math.h>
-#include <deal.II/dofs/dof_accessor.h>
-#include <deal.II/dofs/dof_renumbering.h>
-#include <deal.II/dofs/dof_tools.h>
-#include <deal.II/fe/fe_nothing.h>
-#include <deal.II/fe/fe_q.h>
-#include <deal.II/fe/fe_system.h>
-#include <deal.II/fe/fe_values.h>
-#include <deal.II/fe/mapping.h>
-#include <deal.II/fe/mapping_fe_field.h>
-#include <deal.II/fe/mapping_manifold.h>
-#include <deal.II/fe/mapping_q.h>
-#include <deal.II/hp/fe_collection.h>
-#include <deal.II/lac/affine_constraints.h>
-#include <deal.II/lac/full_matrix.h>
-#include <deal.II/lac/sparse_direct.h>
-#include <deal.II/lac/sparse_matrix.h>
-#include <deal.II/lac/vector.h>
-#include <deal.II/numerics/data_out.h>
-#include <deal.II/numerics/error_estimator.h>
-#include <deal.II/numerics/vector_tools.h>
-#include <fstream>
-#include <iostream>
-#include <deal.II/base/quadrature_lib.h>
-#include <deal.II/base/logstream.h>
-#include <deal.II/base/function.h>
-#include <deal.II/base/utilities.h>
-#include <deal.II/base/conditional_ostream.h>
-#include <deal.II/base/work_stream.h>
-#include <deal.II/base/timer.h>
 #include <deal.II/base/parameter_handler.h>
-
-#include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/solver_bicgstab.h>
-#include <deal.II/lac/solver_cg.h>
-#include <deal.II/lac/solver_gmres.h>
-#include <deal.II/lac/affine_constraints.h>
 #include <deal.II/lac/block_sparsity_pattern.h>
 #include <deal.II/lac/trilinos_parallel_block_vector.h>
 #include <deal.II/lac/trilinos_sparse_matrix.h>
 #include <deal.II/lac/trilinos_block_sparse_matrix.h>
 #include <deal.II/lac/trilinos_precondition.h>
 #include <deal.II/lac/trilinos_solver.h>
-
-#include <deal.II/grid/tria.h>
+#include <deal.II/fe/mapping_manifold.h>
 #include <deal.II/grid/grid_generator.h>
-#include <deal.II/grid/filtered_iterator.h>
-#include <deal.II/grid/manifold_lib.h>
-#include <deal.II/grid/grid_tools.h>
-#include <deal.II/grid/grid_refinement.h>
-
-#include <deal.II/dofs/dof_handler.h>
-#include <deal.II/dofs/dof_renumbering.h>
-#include <deal.II/dofs/dof_tools.h>
-
-#include <deal.II/fe/fe_q.h>
-#include <deal.II/fe/fe_dgq.h>
-#include <deal.II/fe/fe_dgp.h>
-#include <deal.II/fe/fe_system.h>
-#include <deal.II/fe/fe_values.h>
-#include <deal.II/fe/mapping_q.h>
-
-#include <deal.II/numerics/vector_tools.h>
-#include <deal.II/numerics/matrix_tools.h>
-#include <deal.II/numerics/data_out.h>
-#include <deal.II/numerics/error_estimator.h>
-#include <deal.II/numerics/solution_transfer.h>
-
-#include <fstream>
-#include <iostream>
 #include <limits>
 #include <locale>
-#include <string>
-
 #include <deal.II/distributed/solution_transfer.h>
-
-#include <deal.II/base/index_set.h>
-#include <deal.II/distributed/tria.h>
 #include <deal.II/distributed/grid_refinement.h>
-
 
 namespace HP_ALE
 {
@@ -805,7 +667,8 @@ namespace HP_ALE
             {
                 GridIn<2> gridin;
                 gridin.attach_triangulation(triangulation);
-                std::ifstream f("/home/lexlee/matrixcompare/simplemesh.msh");
+                std::ifstream f("/home/lexlee/Downloads/v1.0debug/case2.msh");
+                //std::ifstream f("/home/lexlee/Downloads/v1.0debug/simplemesh.msh");
                 gridin.read_msh(f);
 
                 // set material id:
@@ -1051,7 +914,7 @@ namespace HP_ALE
             {
                 GridIn<2> gridin;
                 gridin.attach_triangulation(triangulation);
-                std::ifstream f("/home/lexlee/Downloads/serial_to_parallel-main/example.msh");
+                std::ifstream f("/home/lexlee/Downloads/serial_to_parallel-main/simplemesh.msh");
                 gridin.read_msh(f);
 
                 // set material id:
@@ -1605,8 +1468,6 @@ namespace HP_ALE
                 }
                 break;
             } // c_trap
-
-
             case TestCase::case_4:
             {
                 {
@@ -1811,7 +1672,6 @@ namespace HP_ALE
                 }
                 break;
             }
-
             case TestCase::case_5:
             {
                 {
@@ -2026,7 +1886,6 @@ namespace HP_ALE
                 }
                 break;
             }
-
             case TestCase::case_6:
             {
                 {
@@ -2326,8 +2185,6 @@ namespace HP_ALE
                 }
                 break;
             } //
-
-
             default:
                 Assert(false, ExcNotImplemented());
         }
@@ -2440,12 +2297,12 @@ namespace HP_ALE
             hp_index_set = dof_handler.locally_owned_dofs();
             hp_relevant_set = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
-            solution.reinit(hp_relevant_set,
-                            MPI_COMM_WORLD);
+            /*solution.reinit(hp_relevant_set,
+                            MPI_COMM_WORLD);*/
 
-            /*solution.reinit(hp_index_set,
+            solution.reinit(hp_index_set,
                             hp_relevant_set,
-                            mpi_communicator);*/
+                            MPI_COMM_WORLD);
             old_solution.reinit(solution);
             current_solution.reinit(solution);
             newton_update.reinit(solution);
@@ -2478,7 +2335,8 @@ namespace HP_ALE
             solution = dis_solution;
             dis_old_solution = dis_solution;
             old_solution = solution;
-            //pcout << " initial sol l2: " << solution.l2_norm() << std::endl;
+            //old_solution = dis_old_solution;
+            pcout << " initial sol l2: " << dis_solution.l2_norm() << std::endl;
         }
     }
 
@@ -2591,31 +2449,42 @@ namespace HP_ALE
                                              hp_relevant_set,
                                              MPI_COMM_WORLD);*/
 
-        /*DoFTools::make_flux_sparsity_pattern(dof_handler,
+        DoFTools::make_flux_sparsity_pattern(dof_handler,
                                              dsp,
                                              constraints_newton_update,
                                              true,
                                              cell_coupling,
                                              face_coupling,
                                              Utilities::MPI::this_mpi_process(
-                                                MPI_COMM_WORLD));*/
-        //constraints_newton_update.condense(dsp);
-        //dsp.compress();
-        //constraints_newton_update.condense(dsp);
-        //system_matrix.reinit(dsp);
+                                                MPI_COMM_WORLD));
+        dsp.compress();
+        sparsity_pattern.copy_from(dsp);
+        system_matrix.reinit(sparsity_pattern);
+        /*system_matrix.reinit(hp_index_set,
+                             sparsity_pattern,
+                             mpi_communicator);*/ // 8932288
 
-        DoFTools::make_flux_sparsity_pattern(dof_handler,
+       /*system_matrix.reinit(hp_index_set,
+                             sparsity_pattern,
+                             mpi_communicator);*/ // 892794
+
+         //dsp.compress();
+
+         //system_matrix.reinit(dsp);
+
+        /*DoFTools::make_flux_sparsity_pattern(dof_handler,
                                              dsp,
                                              cell_coupling,
                                              face_coupling,
                                              Utilities::MPI::this_mpi_process(
                                                      MPI_COMM_WORLD));
         constraints_newton_update.condense(dsp);
+
         sparsity_pattern.copy_from(dsp);
-        /*system_matrix.reinit(hp_index_set,
+        system_matrix.reinit(hp_index_set,
                              sparsity_pattern,
                              MPI_COMM_WORLD);*/
-        system_matrix.reinit(sparsity_pattern);
+        //system_matrix.reinit(sparsity_pattern);
 
     }
 
@@ -3035,12 +2904,12 @@ namespace HP_ALE
                     // Sigma^star F_hat_inv_transpose_star J_hat_star
                     tmp_rhs = 0.;
 
-                    // div(F_hat_inv . v_s J_hat)
-                    // = J_hat F_hat_inv : grad_hat(v_s)
-                    //tmp_rhs += jacobian * scalar_product(inv_F_T, grad_vs[q]) *
-                    //volume_shape_values[i];
-                    tmp_rhs += phi_s0 / jacobian *
-                               volume_shape_values[i];
+                     //div(F_hat_inv . v_s J_hat)
+                     //= J_hat F_hat_inv : grad_hat(v_s)
+                    tmp_rhs += jacobian * scalar_product(inv_F_T, grad_vs[q]) *
+                    volume_shape_values[i];
+                    /*tmp_rhs += phi_s0 / jacobian *
+                               volume_shape_values[i];*/
 
                     // no need to change this, pay attention to the negative sign
                     copy_data.volume_cell_rhs(i) -=
@@ -3054,10 +2923,10 @@ namespace HP_ALE
                     {
                         tmp_mat = 0.;
 
-                        // tmp_mat += jacobian / time_step * volume_shape_values[j] *
-                        //        volume_shape_values[i];
-                        tmp_mat += volume_shape_values[j] *
-                                   volume_shape_values[i];
+                         tmp_mat += jacobian / time_step * volume_shape_values[j] *
+                                volume_shape_values[i];
+                       /* tmp_mat += volume_shape_values[j] *
+                                   volume_shape_values[i];*/
 
                         // add all the other terms here using the same format
                         // no need to change this
@@ -3120,13 +2989,13 @@ namespace HP_ALE
         PerTaskData cp;
 
         auto worker =
-                [this](const typename DoFHandler<dim>::active_cell_iterator &cell,
+                [=](const typename DoFHandler<dim>::active_cell_iterator &cell,
                        ScratchData &                                         scratch,
                        PerTaskData &                                         copy_data) {
-                    this->local_assemble_volume(cell, scratch, copy_data);
+                    local_assemble_volume(cell, scratch, copy_data);
                 };
-        auto copier = [this](const PerTaskData &copy_data) {
-            this->copy_local_to_global_volume(copy_data);
+        auto copier = [=](const PerTaskData &copy_data) {
+            copy_local_to_global_volume(copy_data);
         };
 
         WorkStream::run(CellFilter(IteratorFilters::LocallyOwnedCell(),
@@ -3159,6 +3028,15 @@ namespace HP_ALE
         TrilinosWrappers::SolverDirect::AdditionalData data(false, "Amesos_Mumps");
         TrilinosWrappers::SolverDirect solver(solver_control, data);
         solver.solve(volume_system_matrix, dis_volume_solution, volume_system_rhs);
+
+
+        auto it_old = dis_volume_old_solution.begin();
+        for (auto it = dis_volume_solution.begin(); it != dis_volume_solution.end();
+             ++it, ++it_old)
+        {
+            *it = std::min((*it_old) * (std::exp(*it)), 0.99);
+        }
+
         constraints_volume.distribute(dis_volume_solution);
         volume_solution = dis_volume_solution;
         pcout << " done!" << std::endl;
@@ -3966,13 +3844,13 @@ namespace HP_ALE
         PerTaskData cp;
 
         auto worker =
-                [this, &update_matrix = std::as_const(update_matrix)](const typename DoFHandler<dim>::active_cell_iterator &cell,
+                [=, &update_matrix = std::as_const(update_matrix)](const typename DoFHandler<dim>::active_cell_iterator &cell,
                                                                       ScratchData &                                         scratch,
                                                                       PerTaskData &                                         copy_data) {
-                    this->local_assemble_hp(cell, scratch, copy_data, update_matrix);
+                    local_assemble_hp(cell, scratch, copy_data, update_matrix);
                 };
-        auto copier = [this, &update_matrix = std::as_const(update_matrix)](const PerTaskData &copy_data) {
-            this->copy_local_to_global_hp(copy_data, update_matrix);
+        auto copier = [=, &update_matrix = std::as_const(update_matrix)](const PerTaskData &copy_data) {
+            copy_local_to_global_hp(copy_data, update_matrix);
         };
 
         WorkStream::run(CellFilter(IteratorFilters::LocallyOwnedCell(),
@@ -3984,7 +3862,7 @@ namespace HP_ALE
         system_matrix.compress(VectorOperation::add);
         system_rhs.compress(VectorOperation::add);
 
-        //pcout << "Number of non-zero elements: " << system_matrix.n_nonzero_elements() << std::endl;
+        pcout << "Number of non-zero elements: " << system_matrix.n_nonzero_elements() << std::endl;
 
     }
 
@@ -4001,12 +3879,16 @@ namespace HP_ALE
         constraints_hp.distribute(dis_current_solution);
         current_solution = dis_current_solution;
 
-        const unsigned int max_iteration = 30;
+        const unsigned int max_iteration = 50;
         unsigned int       iteration     = 0;
         const double       tol           = 1e-8;
         const double       alpha_min     = 0.01;
         assemble_system_workstream(false);
         double residual_hp = system_rhs.l2_norm();
+
+        double g1,g2,g3,g0,g_final; // the l2 norm for the rhs u_k
+        double alpha_0, alpha_2, alpha_3, alpha_final;
+        double h1, h2, h3;
 
         pcout << " initial residual = " << residual_hp << std::endl;
         if (residual_hp<tol)
@@ -4015,18 +3897,129 @@ namespace HP_ALE
             abort();
         }
 
+        /*SolverControl                    solver_control;
+        TrilinosWrappers::SolverDirect::AdditionalData data(false,
+                                                            "Amesos_Mumps");
+        TrilinosWrappers::SolverDirect solver(solver_control, data);*/
+
         while (iteration < max_iteration && residual_hp > tol)
         {
             SolverControl                    solver_control;
-            TrilinosWrappers::SolverDirect::AdditionalData data(false, "Amesos_Mumps");
+            TrilinosWrappers::SolverDirect::AdditionalData data(false,
+                                                                "Amesos_Mumps");
             TrilinosWrappers::SolverDirect solver(solver_control, data);
+
+
+
+            alpha_3 = 1;
+
+            TrilinosWrappers::MPI::Vector u_k(dis_current_solution);
+
             assemble_system_workstream(true);
-            solver.solve(system_matrix, dis_newton_update, system_rhs);
+
+            solver.initialize(system_matrix);
+
+
+            g1 = system_rhs.l2_norm();
+
+            dis_newton_update = system_rhs;
+
+            solver.solve(dis_newton_update,system_rhs);
+
+
             constraints_newton_update.distribute(dis_newton_update);
+            current_solution = dis_current_solution;
+
+            TrilinosWrappers::MPI::Vector du_k(dis_newton_update);
+
             dis_current_solution += dis_newton_update;
             current_solution = dis_current_solution;
-            residual_hp = system_rhs.l2_norm();
-            pcout << " k= " << iteration << " residual = " << residual_hp
+
+            assemble_system_workstream(true);
+            g3 = system_rhs.l2_norm();
+            alpha_final = 1;
+            g_final = g3;
+
+            if (g3>g1)
+            {
+                while(g3>g1)
+                {
+                    alpha_3 = alpha_3/2;
+                    dis_current_solution = u_k;
+                    current_solution = dis_current_solution;
+                    du_k *= alpha_3;
+                    dis_current_solution += du_k;
+                    current_solution = dis_current_solution;
+                    assemble_system_workstream(false);
+                    g3 = system_rhs.l2_norm();
+                    du_k = dis_newton_update;
+                    if (alpha_3<alpha_min)
+                    {
+                        pcout<<"Newton Iteration is UNCOPELED!"<<std::endl;
+                        abort();
+                    }
+                }
+
+                alpha_2 = alpha_3/2;
+                dis_current_solution = u_k;
+                current_solution = dis_current_solution;
+                du_k *= alpha_2;
+                dis_current_solution += du_k;
+                current_solution = dis_current_solution;
+                assemble_system_workstream(false);
+                g2 = system_rhs.l2_norm();
+                du_k = dis_newton_update;
+
+
+                h1 = (g2-g1)/alpha_2;
+                h2 = (g3-g2)/(alpha_3-alpha_2);
+                h3 = (h2-h1)/alpha_3;
+                alpha_0 = 0.5*(alpha_2 - h1/h3);
+
+                dis_current_solution = u_k;
+                current_solution = dis_current_solution;
+                du_k *= alpha_0;
+                dis_current_solution += du_k;
+                current_solution = dis_current_solution;
+                assemble_system_workstream(false);
+                g0 = system_rhs.l2_norm();
+                du_k = dis_newton_update;
+
+                alpha_final = alpha_0;
+                g_final = g0;
+                if (g2 < g0)
+                {
+                    alpha_final = alpha_2;
+                    g_final = g2;
+                    if (g3 < g2)
+                    {
+                        alpha_final = alpha_3;
+                        g_final = g3;
+                    }
+
+                }
+                else if (g3 < g0)
+                {
+                    alpha_final = alpha_3;
+                    g_final = g3;
+                    if (g2 < g3)
+                    {
+                        alpha_final = alpha_2;
+                        g_final = g2;
+                    }
+
+                }
+            }
+
+            dis_current_solution = u_k;
+            current_solution = dis_current_solution;
+            du_k *= alpha_final;
+            dis_current_solution += du_k;
+            current_solution = dis_current_solution;
+            residual_hp=g_final;
+
+            pcout << " k= " << iteration << " residual = " << g_final
+                  << " alpha= " << alpha_final
                   << std::endl;
             iteration++;
         }
@@ -4118,13 +4111,11 @@ namespace HP_ALE
         constraints_flux.clear();
         constraints_flux.reinit(hp_relevant_set);
         make_flux_constraints(constraints_flux);
-        //  constraints_flux.print(std::cout);
         constraints_flux.close();
 
         constraints_hp.clear();
         constraints_hp.reinit(hp_relevant_set);
         constraints_hp.merge(constraints_hp_nonzero);
-        //constraints_hp.merge(side_no_flux);
         constraints_hp.merge(constraints_flux,
                              AffineConstraints<double>::MergeConflictBehavior::right_object_wins);
         constraints_hp.close();
@@ -4132,11 +4123,9 @@ namespace HP_ALE
         constraints_newton_update.clear();
         constraints_newton_update.reinit(hp_relevant_set);
         constraints_newton_update.merge(constraints_boundary);
-        //constraints_newton_update.merge(side_no_flux);
         constraints_newton_update.merge(constraints_flux,
                                         AffineConstraints<double>::MergeConflictBehavior::right_object_wins);
         constraints_newton_update.close();
-        //pcout << " update constraints done " << std::endl;
     }
 
     // no need to modify
@@ -4192,10 +4181,10 @@ namespace HP_ALE
         const double final_time = 20.0;//20000. * static_cast<double>(time_step);
 
         /*std::string   fileNameBaseLsns;
-    std::ofstream myfile;
-    myfile.open(("output_variables" + fileNameBaseLsns + ".dat").c_str());
-    myfile << std::fixed;*/
-        pcout << "going to do loop" << std::endl;
+        std::ofstream myfile;
+        myfile.open(("output_variables" + fileNameBaseLsns + ".dat").c_str());
+        myfile << std::fixed;
+        pcout << "going to do loop" << std::endl;*/
 
         do
         {
@@ -4216,12 +4205,14 @@ namespace HP_ALE
             }
 
             dis_volume_old_solution = dis_volume_solution;
+            volume_solution = dis_volume_solution;
             volume_old_solution = volume_solution;
             dis_old_solution = dis_solution;
+            solution = dis_solution;
             old_solution        = solution;
             ++step;
-            //if (step % 1 == 0)
-            //output_results(step);
+            if (step % 1 == 0)
+            output_results(step);
             time += time_step;
         }
         while (time < final_time);
@@ -4236,7 +4227,8 @@ int main(int argc, char *argv[])
     {
         using namespace HP_ALE;
         Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, numbers::invalid_unsigned_int);
-        const TestCase test_case = TestCase::case_1;
+        //Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 32);
+        const TestCase test_case = TestCase::case_2;
 
         //pcout << "running " << enum_str[static_cast<int>(test_case)]
         //<< std::endl;
