@@ -70,6 +70,78 @@
 #include <locale>
 #include <deal.II/distributed/solution_transfer.h>
 #include <deal.II/distributed/grid_refinement.h>
+#include <deal.II/base/derivative_form.h>
+#include <deal.II/base/function.h>
+#include <deal.II/base/logstream.h>
+#include <deal.II/base/multithread_info.h>
+#include <deal.II/base/qprojector.h>
+#include <deal.II/base/quadrature_lib.h>
+#include <deal.II/base/table.h>
+#include <deal.II/base/utilities.h>
+#include <deal.II/base/work_stream.h>
+#include <deal.II/base/table.h>
+#include <deal.II/base/parameter_handler.h>
+
+#include <deal.II/differentiation/sd/symengine_math.h>
+
+#include <deal.II/dofs/dof_accessor.h>
+#include <deal.II/dofs/dof_renumbering.h>
+#include <deal.II/dofs/dof_tools.h>
+
+#include <deal.II/fe/fe_nothing.h>
+#include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_simplex_p.h>
+#include <deal.II/fe/fe_system.h>
+#include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/mapping.h>
+#include <deal.II/fe/mapping_fe.h>
+#include <deal.II/fe/mapping_fe_field.h>
+#include <deal.II/fe/mapping_manifold.h>
+#include <deal.II/fe/mapping_q.h>
+
+#include <deal.II/grid/grid_generator.h>
+#include <deal.II/grid/grid_in.h>
+#include <deal.II/grid/grid_out.h>
+#include <deal.II/grid/grid_refinement.h>
+#include <deal.II/grid/grid_tools.h>
+#include <deal.II/grid/manifold_lib.h>
+#include <deal.II/grid/tria.h>
+#include <deal.II/grid/tria_accessor.h>
+#include <deal.II/grid/tria_iterator.h>
+#include <deal.II/grid/grid_tools_cache.h>
+
+// #include <deal.II/hp/dof_handler.h>
+#include <deal.II/hp/fe_collection.h>
+#include <deal.II/hp/fe_values.h>
+
+#include <deal.II/lac/affine_constraints.h>
+#include <deal.II/lac/full_matrix.h>
+#include <deal.II/lac/sparse_direct.h>
+#include <deal.II/lac/sparse_matrix.h>
+#include <deal.II/lac/vector.h>
+
+#include <deal.II/meshworker/mesh_loop.h>
+
+#include <deal.II/numerics/data_out.h>
+#include <deal.II/numerics/error_estimator.h>
+#include <deal.II/numerics/vector_tools.h>
+
+// remeshing stuff
+#include <deal.II/gmsh/utilities.h>
+
+#include <deal.II/opencascade/manifold_lib.h>
+#include <deal.II/opencascade/utilities.h>
+
+#include <Standard_Stream.hxx>
+#include <TopTools.hxx>
+#include <TopoDS_Shape.hxx>
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+
 
 namespace HP_ALE
 {
@@ -175,11 +247,15 @@ namespace HP_ALE
         const unsigned int volume_degree;
 
         MPI_Comm     mpi_communicator;
-        parallel::distributed::Triangulation<dim> triangulation;
+        //parallel::distributed::Triangulation<dim> triangulation;
+        Triangulation<dim> triangulation;
 
         FESystem<dim>      stokes_fe;
         FESystem<dim>      hydrogel_fe;
-        FE_Q<dim>          volume_fe; // volume fraction phi_s
+
+        FE_SimplexP<dim> volume_fe;
+
+        //FE_Q<dim>          volume_fe; // volume fraction phi_s
 
         hp::FECollection<dim> fe_collection;
         DoFHandler<dim>       dof_handler;
@@ -226,7 +302,8 @@ namespace HP_ALE
         TrilinosWrappers::MPI::Vector dis_volume_solution;
         TrilinosWrappers::MPI::Vector dis_volume_old_solution;
 
-        std::unique_ptr<MappingQ<dim>> mapping_pointer;
+        //std::unique_ptr<MappingQ<dim>> mapping_pointer;
+        std::unique_ptr<MappingFE<dim>> mapping_pointer;
         hp::MappingCollection<dim>     mapping_collection;
 
         std::vector<unsigned int> interface_dofs_flag;
@@ -410,6 +487,10 @@ namespace HP_ALE
         };
 
         void
+        solver(TrilinosWrappers::SparseMatrix &matrix,
+                                           TrilinosWrappers::MPI::Vector &sol,
+                                           TrilinosWrappers::MPI::Vector &rhs);
+        void
         local_assemble_hp(
                 const typename DoFHandler<dim>::active_cell_iterator &cell,
                 ScratchData &                                         scratch,
@@ -440,7 +521,7 @@ namespace HP_ALE
             const unsigned int velocity_degree,
             const unsigned int pressure_degree)
     {
-        std::vector<const FiniteElement<dim> *> fe_list;
+        /*std::vector<const FiniteElement<dim> *> fe_list;
         fe_list.push_back(new FE_Q<dim>(velocity_degree)); //(dim) displacement
         fe_list.push_back(
                 new FE_Q<dim>(velocity_degree)); //(dim) mesh velocity (solid velocity)
@@ -448,7 +529,20 @@ namespace HP_ALE
                 new FE_Q<dim>(velocity_degree)); //(dim) hydrogel fluid velocity v_f
         fe_list.push_back(new FE_Q<dim>(pressure_degree)); //(1)   hydrogel pressure
         fe_list.push_back(new FE_Nothing<dim>()); //(dim) outer fluid velocity V
-        fe_list.push_back(new FE_Nothing<dim>()); //(1)   pressure P
+        fe_list.push_back(new FE_Nothing<dim>()); //(1)   pressure P*/
+        std::vector<const FiniteElement<dim> *> fe_list;
+        fe_list.push_back(
+                new FE_SimplexP<dim>(velocity_degree)); //(dim) displacement
+        fe_list.push_back(new FE_SimplexP<dim>(
+                velocity_degree)); //(dim) mesh velocity (solid velocity)
+        fe_list.push_back(new FE_SimplexP<dim>(
+                velocity_degree)); //(dim) hydrogel fluid velocity v_f
+        fe_list.push_back(
+                new FE_SimplexP<dim>(pressure_degree)); //(1)   hydrogel pressure
+        fe_list.push_back(new FE_Nothing<dim>(
+                ReferenceCells::Triangle)); //(dim) outer fluid velocity V
+        fe_list.push_back(
+                new FE_Nothing<dim>(ReferenceCells::Triangle)); //(1)   pressure P
         return fe_list;
     }
 
@@ -458,7 +552,7 @@ namespace HP_ALE
             const unsigned int velocity_degree,
             const unsigned int pressure_degree)
     {
-        std::vector<const FiniteElement<dim> *> fe_list;
+        /*std::vector<const FiniteElement<dim> *> fe_list;
         fe_list.push_back(new FE_Q<dim>(velocity_degree)); //(dim) displacement
         fe_list.push_back(
                 new FE_Nothing<dim>()); //(dim) mesh velocity (solid velocity)
@@ -467,7 +561,19 @@ namespace HP_ALE
         fe_list.push_back(new FE_Nothing<dim>()); //(1)   hydrogel pressure
         fe_list.push_back(
                 new FE_Q<dim>(velocity_degree)); //(dim) outer fluid velocity V_f
-        fe_list.push_back(new FE_Q<dim>(pressure_degree)); //(1)   pressure P
+        fe_list.push_back(new FE_Q<dim>(pressure_degree)); //(1)   pressure P*/
+        std::vector<const FiniteElement<dim> *> fe_list;
+        fe_list.push_back(
+                new FE_SimplexP<dim>(velocity_degree)); //(dim) displacement
+        fe_list.push_back(new FE_Nothing<dim>(
+                ReferenceCells::Triangle)); //(dim) mesh velocity (solid velocity)
+        fe_list.push_back(new FE_Nothing<dim>(
+                ReferenceCells::Triangle)); //(dim) hydrogel fluid velocity v_f
+        fe_list.push_back(
+                new FE_Nothing<dim>(ReferenceCells::Triangle)); //(1)   hydrogel pressure
+        fe_list.push_back(
+                new FE_SimplexP<dim>(velocity_degree)); //(dim) outer fluid velocity V_f
+        fe_list.push_back(new FE_SimplexP<dim>(pressure_degree)); //(1)   pressure P
         return fe_list;
     }
 
@@ -497,8 +603,11 @@ namespace HP_ALE
             , pressure_degree(pressure_degree)
             , volume_degree(volume_degree)
             , mpi_communicator(MPI_COMM_WORLD)
-            , triangulation(mpi_communicator,
+           /*, triangulation(mpi_communicator,
                             typename Triangulation<dim>::MeshSmoothing(
+                                    Triangulation<dim>::smoothing_on_refinement |
+                                    Triangulation<dim>::smoothing_on_coarsening))*/
+            , triangulation(typename Triangulation<dim>::MeshSmoothing(
                                     Triangulation<dim>::smoothing_on_refinement |
                                     Triangulation<dim>::smoothing_on_coarsening))
             , stokes_fe(create_stokes_fe_list(velocity_degree, pressure_degree),
@@ -537,7 +646,8 @@ namespace HP_ALE
         // 1: hydrogel domain
         fe_collection.push_back(stokes_fe);
         fe_collection.push_back(hydrogel_fe);
-        volume_fe_collection.push_back(FE_Nothing<dim>());
+        volume_fe_collection.push_back(FE_Nothing<dim>(ReferenceCells::Triangle));
+        //volume_fe_collection.push_back(FE_Nothing<dim>());
         volume_fe_collection.push_back(volume_fe);
         print_variables();
 
@@ -547,56 +657,70 @@ namespace HP_ALE
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
+                /*mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
                 mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+                        std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
                 break;
             }
             case TestCase::case_2:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
+                /*mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
                 mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+                        std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
                 break;
             }
             case TestCase::case_3:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
+                /*mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
                 mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+                        std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
                 break;
             }
             case TestCase::case_4:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
+                /*mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
                 mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+                        std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
                 break;
             }
             case TestCase::case_5:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
+                /*mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
                 mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+                        std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
                 break;
             }
             case TestCase::case_6:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
+                /*mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
                 mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+                        std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
                 break;
             }
             case TestCase::case_7:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
+                /*mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
                 mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+                        std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
                 break;
             }
             default:
@@ -667,7 +791,7 @@ namespace HP_ALE
             {
                 GridIn<2> gridin;
                 gridin.attach_triangulation(triangulation);
-                std::ifstream f("/home/lexlee/Downloads/v1.0debug/case2.msh");
+                std::ifstream f("/home/lexlee/Downloads/triangleversion/case2.msh");
                 //std::ifstream f("/home/lexlee/Downloads/v1.0debug/simplemesh.msh");
                 gridin.read_msh(f);
 
@@ -2439,15 +2563,15 @@ namespace HP_ALE
     FluidStructureProblem<dim>::setup_hp_sparse_matrix(const IndexSet &hp_index_set,
                                                        const IndexSet &hp_relevant_set)
     {
-        DynamicSparsityPattern dsp(hp_relevant_set);
+        //DynamicSparsityPattern dsp(hp_relevant_set);
         Table<2, DoFTools::Coupling> cell_coupling, face_coupling;
         const bool print_coupling_pattern = false;
         make_coupling(cell_coupling, face_coupling, print_coupling_pattern);
 
-        /*TrilinosWrappers::SparsityPattern dsp(hp_index_set,
+        TrilinosWrappers::SparsityPattern dsp(hp_index_set,
                                              hp_index_set,
                                              hp_relevant_set,
-                                             MPI_COMM_WORLD);*/
+                                             MPI_COMM_WORLD);
 
         DoFTools::make_flux_sparsity_pattern(dof_handler,
                                              dsp,
@@ -2458,30 +2582,26 @@ namespace HP_ALE
                                              Utilities::MPI::this_mpi_process(
                                                 MPI_COMM_WORLD));
         dsp.compress();
-        sparsity_pattern.copy_from(dsp);
-        system_matrix.reinit(sparsity_pattern);
+       //sparsity_pattern.copy_from(dsp);
+        system_matrix.reinit(dsp);  // 892794
         /*system_matrix.reinit(hp_index_set,
                              sparsity_pattern,
-                             mpi_communicator);*/ // 8932288
-
+                             mpi_communicator);*/ // 893288
+        //condense, dofs 901310
        /*system_matrix.reinit(hp_index_set,
                              sparsity_pattern,
-                             mpi_communicator);*/ // 892794
-
-         //dsp.compress();
-
-         //system_matrix.reinit(dsp);
+                             mpi_communicator);*/ 
 
         /*DoFTools::make_flux_sparsity_pattern(dof_handler,
                                              dsp,
                                              cell_coupling,
                                              face_coupling,
                                              Utilities::MPI::this_mpi_process(
-                                                     MPI_COMM_WORLD));
-        constraints_newton_update.condense(dsp);
+                                                     MPI_COMM_WORLD));*/
+        /*constraints_newton_update.condense(dsp);
 
-        sparsity_pattern.copy_from(dsp);
-        system_matrix.reinit(hp_index_set,
+        sparsity_pattern.copy_from(dsp);*/
+        /*system_matrix.reinit(hp_index_set,
                              sparsity_pattern,
                              MPI_COMM_WORLD);*/
         //system_matrix.reinit(sparsity_pattern);
@@ -2500,7 +2620,11 @@ namespace HP_ALE
         Quadrature<dim - 1>     tmp_q(unit_face_points);
         std::vector<Point<dim>> tmp_p(tmp_q.size());
 
-        QProjector<dim>::project_to_face(ReferenceCells::Quadrilateral,
+        /*QProjector<dim>::project_to_face(ReferenceCells::Quadrilateral,
+                                         tmp_q,
+                                         face_no,
+                                         tmp_p);*/
+        QProjector<dim>::project_to_face(ReferenceCells::Triangle,
                                          tmp_q,
                                          face_no,
                                          tmp_p);
@@ -2834,6 +2958,18 @@ namespace HP_ALE
 
     }
 
+    template <int dim>
+    void
+    FluidStructureProblem<dim>::solver(TrilinosWrappers::SparseMatrix &matrix,
+                                       TrilinosWrappers::MPI::Vector &sol,
+                                       TrilinosWrappers::MPI::Vector &rhs)
+    {
+        SolverControl                    solver_control;
+        TrilinosWrappers::SolverDirect::AdditionalData data(false, "Amesos_Mumps");
+        TrilinosWrappers::SolverDirect DirectSolver(solver_control, data);
+        DirectSolver.solve(matrix, sol, rhs);
+    }
+
     //no need to modify
     template <int dim>
     void
@@ -2960,13 +3096,21 @@ namespace HP_ALE
         pcout << " assembling volume...";
         volume_system_matrix = 0;
         volume_system_rhs    = 0;
+
         using CellFilter =
                 FilteredIterator<typename DoFHandler<2>::active_cell_iterator>;
-        const QGauss<dim> quadrature_formula(2 + volume_degree);
+        const QGaussSimplex<dim> quadrature_formula(2 + volume_degree);
+        // same quadrature for all
+        const hp::QCollection<dim>   q_collection{quadrature_formula,
+                                                  quadrature_formula};
+        const QGaussSimplex<dim - 1> face_quadrature_formula(2 + volume_degree);
+
+        /*const QGauss<dim> quadrature_formula(2 + volume_degree);
         // same quadrature for all
         const hp::QCollection<dim> q_collection{quadrature_formula,
                                                 quadrature_formula};
-        const QGauss<dim - 1>      face_quadrature_formula(2 + volume_degree);
+        const QGauss<dim - 1>      face_quadrature_formula(2 + volume_degree);*/
+
         const UpdateFlags          hp_update_flags =
                 update_values | update_gradients | update_quadrature_points;
         const UpdateFlags face_update_flags = update_values; // update_default
@@ -3024,12 +3168,11 @@ namespace HP_ALE
     FluidStructureProblem<dim>::solve_volume()
     {
         pcout << " solving volume..." << std::endl;
-        SolverControl                    solver_control;
+        /*SolverControl                    solver_control;
         TrilinosWrappers::SolverDirect::AdditionalData data(false, "Amesos_Mumps");
         TrilinosWrappers::SolverDirect solver(solver_control, data);
-        solver.solve(volume_system_matrix, dis_volume_solution, volume_system_rhs);
-
-
+        solver.solve(volume_system_matrix, dis_volume_solution, volume_system_rhs);*/
+        solver(volume_system_matrix, dis_volume_solution, volume_system_rhs);
         auto it_old = dis_volume_old_solution.begin();
         for (auto it = dis_volume_solution.begin(); it != dis_volume_solution.end();
              ++it, ++it_old)
@@ -3812,12 +3955,20 @@ namespace HP_ALE
         using CellFilter =
                 FilteredIterator<typename DoFHandler<2>::active_cell_iterator>;
 
+        const QGaussSimplex<dim> quadrature_formula(2 + velocity_degree);
+        // same quadrature for all
+        const hp::QCollection<dim>   q_collection{quadrature_formula,
+                                                  quadrature_formula};
+        const QGaussSimplex<dim - 1> face_quadrature_formula(2 + velocity_degree);
 
-        const QGauss<dim> quadrature_formula(2 + 2 * velocity_degree);
+
+       /* const QGauss<dim> quadrature_formula(2 + 2 * velocity_degree);
         // same quadrature for all
         const hp::QCollection<dim> q_collection{quadrature_formula,
                                                 quadrature_formula};
-        const QGauss<dim - 1>      face_quadrature_formula(2 + 2 * velocity_degree);
+        const QGauss<dim - 1>      face_quadrature_formula(2 + 2 * velocity_degree);*/
+
+
         const UpdateFlags hp_update_flags = update_values | update_gradients |
                                             update_JxW_values |
                                             update_quadrature_points;
@@ -3904,37 +4055,26 @@ namespace HP_ALE
 
         while (iteration < max_iteration && residual_hp > tol)
         {
-            SolverControl                    solver_control;
+            /*SolverControl                    solver_control;
             TrilinosWrappers::SolverDirect::AdditionalData data(false,
                                                                 "Amesos_Mumps");
-            TrilinosWrappers::SolverDirect solver(solver_control, data);
-
-
+            TrilinosWrappers::SolverDirect solver(solver_control, data);*/
 
             alpha_3 = 1;
-
             TrilinosWrappers::MPI::Vector u_k(dis_current_solution);
-
             assemble_system_workstream(true);
 
-            solver.initialize(system_matrix);
-
-
+            //solver.initialize(system_matrix);
             g1 = system_rhs.l2_norm();
-
             dis_newton_update = system_rhs;
 
-            solver.solve(dis_newton_update,system_rhs);
-
+            solver(system_matrix, dis_newton_update, system_rhs);
 
             constraints_newton_update.distribute(dis_newton_update);
             current_solution = dis_current_solution;
-
             TrilinosWrappers::MPI::Vector du_k(dis_newton_update);
-
             dis_current_solution += dis_newton_update;
             current_solution = dis_current_solution;
-
             assemble_system_workstream(true);
             g3 = system_rhs.l2_norm();
             alpha_final = 1;
@@ -4035,6 +4175,9 @@ namespace HP_ALE
     FluidStructureProblem<dim>::output_results(
             const unsigned int step_number) const
     {
+       // std::string filename = filename_base;
+     //   filename +="_quad";
+
         std::vector<std::string> solution_names(dim, "displacement");
         std::vector<DataComponentInterpretation::DataComponentInterpretation>
                 data_component_interpretation(
