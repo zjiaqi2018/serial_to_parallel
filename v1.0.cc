@@ -1,4 +1,4 @@
-#include <deal.II/base/function.h>
+#define USE_TRIANGLE
 #include <deal.II/grid/reference_cell.h>
 #include <deal.II/lac/matrix_out.h>
 #include <deal.II/base/quadrature_lib.h>
@@ -70,78 +70,25 @@
 #include <locale>
 #include <deal.II/distributed/solution_transfer.h>
 #include <deal.II/distributed/grid_refinement.h>
-#include <deal.II/base/derivative_form.h>
 #include <deal.II/base/function.h>
-#include <deal.II/base/logstream.h>
-#include <deal.II/base/multithread_info.h>
-#include <deal.II/base/qprojector.h>
-#include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/table.h>
 #include <deal.II/base/utilities.h>
-#include <deal.II/base/work_stream.h>
-#include <deal.II/base/table.h>
-#include <deal.II/base/parameter_handler.h>
-
-#include <deal.II/differentiation/sd/symengine_math.h>
-
-#include <deal.II/dofs/dof_accessor.h>
-#include <deal.II/dofs/dof_renumbering.h>
-#include <deal.II/dofs/dof_tools.h>
-
-#include <deal.II/fe/fe_nothing.h>
-#include <deal.II/fe/fe_q.h>
 #include <deal.II/fe/fe_simplex_p.h>
-#include <deal.II/fe/fe_system.h>
-#include <deal.II/fe/fe_values.h>
-#include <deal.II/fe/mapping.h>
 #include <deal.II/fe/mapping_fe.h>
 #include <deal.II/fe/mapping_fe_field.h>
-#include <deal.II/fe/mapping_manifold.h>
-#include <deal.II/fe/mapping_q.h>
-
-#include <deal.II/grid/grid_generator.h>
-#include <deal.II/grid/grid_in.h>
-#include <deal.II/grid/grid_out.h>
-#include <deal.II/grid/grid_refinement.h>
-#include <deal.II/grid/grid_tools.h>
-#include <deal.II/grid/manifold_lib.h>
-#include <deal.II/grid/tria.h>
 #include <deal.II/grid/tria_accessor.h>
-#include <deal.II/grid/tria_iterator.h>
 #include <deal.II/grid/grid_tools_cache.h>
-
-// #include <deal.II/hp/dof_handler.h>
-#include <deal.II/hp/fe_collection.h>
 #include <deal.II/hp/fe_values.h>
-
-#include <deal.II/lac/affine_constraints.h>
-#include <deal.II/lac/full_matrix.h>
-#include <deal.II/lac/sparse_direct.h>
-#include <deal.II/lac/sparse_matrix.h>
-#include <deal.II/lac/vector.h>
-
 #include <deal.II/meshworker/mesh_loop.h>
-
-#include <deal.II/numerics/data_out.h>
-#include <deal.II/numerics/error_estimator.h>
-#include <deal.II/numerics/vector_tools.h>
-
-// remeshing stuff
 #include <deal.II/gmsh/utilities.h>
-
 #include <deal.II/opencascade/manifold_lib.h>
 #include <deal.II/opencascade/utilities.h>
-
 #include <Standard_Stream.hxx>
 #include <TopTools.hxx>
 #include <TopoDS_Shape.hxx>
-
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
-#include <iostream>
-
 
 namespace HP_ALE
 {
@@ -252,11 +199,11 @@ namespace HP_ALE
 
         FESystem<dim>      stokes_fe;
         FESystem<dim>      hydrogel_fe;
-
+#ifdef USE_TRIANGLE
         FE_SimplexP<dim> volume_fe;
-
-        //FE_Q<dim>          volume_fe; // volume fraction phi_s
-
+#else
+        FE_Q<dim>          volume_fe; // volume fraction phi_s
+#endif
         hp::FECollection<dim> fe_collection;
         DoFHandler<dim>       dof_handler;
 
@@ -301,9 +248,11 @@ namespace HP_ALE
         TrilinosWrappers::MPI::Vector volume_system_rhs;
         TrilinosWrappers::MPI::Vector dis_volume_solution;
         TrilinosWrappers::MPI::Vector dis_volume_old_solution;
-
-        //std::unique_ptr<MappingQ<dim>> mapping_pointer;
+#ifdef USE_TRIANGLE
         std::unique_ptr<MappingFE<dim>> mapping_pointer;
+#else
+        std::unique_ptr<MappingQ<dim>> mapping_pointer;
+#endif
         hp::MappingCollection<dim>     mapping_collection;
 
         std::vector<unsigned int> interface_dofs_flag;
@@ -521,15 +470,7 @@ namespace HP_ALE
             const unsigned int velocity_degree,
             const unsigned int pressure_degree)
     {
-        /*std::vector<const FiniteElement<dim> *> fe_list;
-        fe_list.push_back(new FE_Q<dim>(velocity_degree)); //(dim) displacement
-        fe_list.push_back(
-                new FE_Q<dim>(velocity_degree)); //(dim) mesh velocity (solid velocity)
-        fe_list.push_back(
-                new FE_Q<dim>(velocity_degree)); //(dim) hydrogel fluid velocity v_f
-        fe_list.push_back(new FE_Q<dim>(pressure_degree)); //(1)   hydrogel pressure
-        fe_list.push_back(new FE_Nothing<dim>()); //(dim) outer fluid velocity V
-        fe_list.push_back(new FE_Nothing<dim>()); //(1)   pressure P*/
+#ifdef USE_TRIANGLE
         std::vector<const FiniteElement<dim> *> fe_list;
         fe_list.push_back(
                 new FE_SimplexP<dim>(velocity_degree)); //(dim) displacement
@@ -543,6 +484,17 @@ namespace HP_ALE
                 ReferenceCells::Triangle)); //(dim) outer fluid velocity V
         fe_list.push_back(
                 new FE_Nothing<dim>(ReferenceCells::Triangle)); //(1)   pressure P
+#else
+        std::vector<const FiniteElement<dim> *> fe_list;
+        fe_list.push_back(new FE_Q<dim>(velocity_degree)); //(dim) displacement
+        fe_list.push_back(
+                new FE_Q<dim>(velocity_degree)); //(dim) mesh velocity (solid velocity)
+        fe_list.push_back(
+                new FE_Q<dim>(velocity_degree)); //(dim) hydrogel fluid velocity v_f
+        fe_list.push_back(new FE_Q<dim>(pressure_degree)); //(1)   hydrogel pressure
+        fe_list.push_back(new FE_Nothing<dim>()); //(dim) outer fluid velocity V
+        fe_list.push_back(new FE_Nothing<dim>()); //(1)   pressure P
+#endif
         return fe_list;
     }
 
@@ -552,16 +504,7 @@ namespace HP_ALE
             const unsigned int velocity_degree,
             const unsigned int pressure_degree)
     {
-        /*std::vector<const FiniteElement<dim> *> fe_list;
-        fe_list.push_back(new FE_Q<dim>(velocity_degree)); //(dim) displacement
-        fe_list.push_back(
-                new FE_Nothing<dim>()); //(dim) mesh velocity (solid velocity)
-        fe_list.push_back(
-                new FE_Nothing<dim>()); //(dim) hydrogel fluid velocity v_f
-        fe_list.push_back(new FE_Nothing<dim>()); //(1)   hydrogel pressure
-        fe_list.push_back(
-                new FE_Q<dim>(velocity_degree)); //(dim) outer fluid velocity V_f
-        fe_list.push_back(new FE_Q<dim>(pressure_degree)); //(1)   pressure P*/
+#ifdef USE_TRIANGLE
         std::vector<const FiniteElement<dim> *> fe_list;
         fe_list.push_back(
                 new FE_SimplexP<dim>(velocity_degree)); //(dim) displacement
@@ -574,6 +517,19 @@ namespace HP_ALE
         fe_list.push_back(
                 new FE_SimplexP<dim>(velocity_degree)); //(dim) outer fluid velocity V_f
         fe_list.push_back(new FE_SimplexP<dim>(pressure_degree)); //(1)   pressure P
+#else
+        std::vector<const FiniteElement<dim> *> fe_list;
+        fe_list.push_back(new FE_Q<dim>(velocity_degree)); //(dim) displacement
+        fe_list.push_back(
+                new FE_Nothing<dim>()); //(dim) mesh velocity (solid velocity)
+        fe_list.push_back(
+                new FE_Nothing<dim>()); //(dim) hydrogel fluid velocity v_f
+        fe_list.push_back(new FE_Nothing<dim>()); //(1)   hydrogel pressure
+        fe_list.push_back(
+                new FE_Q<dim>(velocity_degree)); //(dim) outer fluid velocity V_f
+        fe_list.push_back(new FE_Q<dim>(pressure_degree)); //(1)   pressure P
+#endif
+
         return fe_list;
     }
 
@@ -646,8 +602,11 @@ namespace HP_ALE
         // 1: hydrogel domain
         fe_collection.push_back(stokes_fe);
         fe_collection.push_back(hydrogel_fe);
+#ifdef USE_TRIANGLE
         volume_fe_collection.push_back(FE_Nothing<dim>(ReferenceCells::Triangle));
-        //volume_fe_collection.push_back(FE_Nothing<dim>());
+#else
+        volume_fe_collection.push_back(FE_Nothing<dim>());
+#endif
         volume_fe_collection.push_back(volume_fe);
         print_variables();
 
@@ -657,70 +616,91 @@ namespace HP_ALE
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
-                /*mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
+#ifdef USE_TRIANGLE
                 mapping_pointer =
                         std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
+#else
+                mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+#endif
                 break;
             }
             case TestCase::case_2:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
-                /*mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
+#ifdef USE_TRIANGLE
                 mapping_pointer =
                         std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
+#else
+                mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+#endif
                 break;
             }
             case TestCase::case_3:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
-                /*mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
+#ifdef USE_TRIANGLE
                 mapping_pointer =
                         std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
+#else
+                mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+#endif
                 break;
             }
             case TestCase::case_4:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
-                /*mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
+#ifdef USE_TRIANGLE
                 mapping_pointer =
                         std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
+#else
+                mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+#endif
                 break;
             }
             case TestCase::case_5:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
-                /*mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
+#ifdef USE_TRIANGLE
                 mapping_pointer =
                         std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
+#else
+                mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+#endif
                 break;
             }
             case TestCase::case_6:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
-                /*mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
+#ifdef USE_TRIANGLE
                 mapping_pointer =
                         std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
+#else
+                mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+#endif
                 break;
             }
             case TestCase::case_7:
             {
                 const bool         use_on_all_cells = true;
                 const unsigned int mapping_degree   = velocity_degree;
-                /*mapping_pointer =
-                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);*/
+#ifdef USE_TRIANGLE
                 mapping_pointer =
                         std::make_unique<MappingFE<dim>>(FE_SimplexP<dim>(1));
+#else
+                mapping_pointer =
+                        std::make_unique<MappingQ<dim>>(mapping_degree, use_on_all_cells);
+#endif
                 break;
             }
             default:
@@ -2619,15 +2599,17 @@ namespace HP_ALE
         std::vector<Point<dim>> return_vals(unit_face_points.size());
         Quadrature<dim - 1>     tmp_q(unit_face_points);
         std::vector<Point<dim>> tmp_p(tmp_q.size());
-
-        /*QProjector<dim>::project_to_face(ReferenceCells::Quadrilateral,
-                                         tmp_q,
-                                         face_no,
-                                         tmp_p);*/
+#ifdef USE_TRIANGLE
         QProjector<dim>::project_to_face(ReferenceCells::Triangle,
                                          tmp_q,
                                          face_no,
                                          tmp_p);
+#else
+        QProjector<dim>::project_to_face(ReferenceCells::Quadrilateral,
+                                         tmp_q,
+                                         face_no,
+                                         tmp_p);
+#endif
         for (unsigned int i = 0; i < unit_face_points.size(); ++i)
         {
             return_vals[i] =
@@ -3096,21 +3078,22 @@ namespace HP_ALE
         pcout << " assembling volume...";
         volume_system_matrix = 0;
         volume_system_rhs    = 0;
-
         using CellFilter =
                 FilteredIterator<typename DoFHandler<2>::active_cell_iterator>;
+
+#ifdef USE_TRIANGLE
         const QGaussSimplex<dim> quadrature_formula(2 + volume_degree);
         // same quadrature for all
         const hp::QCollection<dim>   q_collection{quadrature_formula,
                                                   quadrature_formula};
         const QGaussSimplex<dim - 1> face_quadrature_formula(2 + volume_degree);
-
-        /*const QGauss<dim> quadrature_formula(2 + volume_degree);
+#else
+        const QGauss<dim> quadrature_formula(2 + volume_degree);
         // same quadrature for all
         const hp::QCollection<dim> q_collection{quadrature_formula,
                                                 quadrature_formula};
-        const QGauss<dim - 1>      face_quadrature_formula(2 + volume_degree);*/
-
+        const QGauss<dim - 1>      face_quadrature_formula(2 + volume_degree);
+#endif
         const UpdateFlags          hp_update_flags =
                 update_values | update_gradients | update_quadrature_points;
         const UpdateFlags face_update_flags = update_values; // update_default
@@ -3193,9 +3176,7 @@ namespace HP_ALE
             PerTaskData &                                         copy_data,
             const bool                                            update_matrix)
     {
-
         copy_data.assemble_interface = false;
-
         scratch.hp_fe_values.reinit(cell_hp);
         typename DoFHandler<dim>::active_cell_iterator cell_volume(
                 &triangulation, cell_hp->level(), cell_hp->index(), &volume_dof_handler);
@@ -3954,21 +3935,19 @@ namespace HP_ALE
 
         using CellFilter =
                 FilteredIterator<typename DoFHandler<2>::active_cell_iterator>;
-
+#ifdef USE_TRIANGLE
         const QGaussSimplex<dim> quadrature_formula(2 + velocity_degree);
         // same quadrature for all
         const hp::QCollection<dim>   q_collection{quadrature_formula,
                                                   quadrature_formula};
         const QGaussSimplex<dim - 1> face_quadrature_formula(2 + velocity_degree);
-
-
-       /* const QGauss<dim> quadrature_formula(2 + 2 * velocity_degree);
+#else
+         const QGauss<dim> quadrature_formula(2 + 2 * velocity_degree);
         // same quadrature for all
         const hp::QCollection<dim> q_collection{quadrature_formula,
                                                 quadrature_formula};
-        const QGauss<dim - 1>      face_quadrature_formula(2 + 2 * velocity_degree);*/
-
-
+        const QGauss<dim - 1>      face_quadrature_formula(2 + 2 * velocity_degree);
+#endif
         const UpdateFlags hp_update_flags = update_values | update_gradients |
                                             update_JxW_values |
                                             update_quadrature_points;
@@ -3991,9 +3970,7 @@ namespace HP_ALE
                        hp_update_flags,
                        volume_update_flag,
                        face_update_flags);
-
         PerTaskData cp;
-
         auto worker =
                 [=, &update_matrix = std::as_const(update_matrix)](const typename DoFHandler<dim>::active_cell_iterator &cell,
                                                                       ScratchData &                                         scratch,
@@ -4012,9 +3989,7 @@ namespace HP_ALE
 
         system_matrix.compress(VectorOperation::add);
         system_rhs.compress(VectorOperation::add);
-
         pcout << "Number of non-zero elements: " << system_matrix.n_nonzero_elements() << std::endl;
-
     }
 
 //change this later for parallel computing
@@ -4048,23 +4023,12 @@ namespace HP_ALE
             abort();
         }
 
-        /*SolverControl                    solver_control;
-        TrilinosWrappers::SolverDirect::AdditionalData data(false,
-                                                            "Amesos_Mumps");
-        TrilinosWrappers::SolverDirect solver(solver_control, data);*/
-
         while (iteration < max_iteration && residual_hp > tol)
         {
-            /*SolverControl                    solver_control;
-            TrilinosWrappers::SolverDirect::AdditionalData data(false,
-                                                                "Amesos_Mumps");
-            TrilinosWrappers::SolverDirect solver(solver_control, data);*/
-
             alpha_3 = 1;
             TrilinosWrappers::MPI::Vector u_k(dis_current_solution);
             assemble_system_workstream(true);
 
-            //solver.initialize(system_matrix);
             g1 = system_rhs.l2_norm();
             dis_newton_update = system_rhs;
 
