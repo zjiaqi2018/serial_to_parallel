@@ -771,7 +771,7 @@ namespace HP_ALE
             {
                 GridIn<2> gridin;
                 gridin.attach_triangulation(triangulation);
-                std::ifstream f("/home/lexlee/Downloads/triangleversion/case2.msh");
+                std::ifstream f("case2.msh");
                 //std::ifstream f("/home/lexlee/Downloads/v1.0debug/simplemesh.msh");
                 gridin.read_msh(f);
 
@@ -2730,8 +2730,7 @@ namespace HP_ALE
             if (cell->is_locally_owned())
             {
                 if (cell_is_in_fluid_domain(cell))
-                    for (unsigned int f = 0; f < GeometryInfo<dim>::faces_per_cell;
-                         ++f) // f : face #
+                    for (const auto &f : cell->face_indices()) // f : face #
                         if (!cell->at_boundary(f))
                         {
                             bool face_is_on_interface = false;
@@ -3581,7 +3580,7 @@ namespace HP_ALE
 
 
             // currently only works for uniform mesh;
-            for (unsigned int f : GeometryInfo<dim>::face_indices())
+            for (const auto &f : cell_hp->face_indices())
                 if (!cell_hp->at_boundary(f))
                     if (cell_is_in_fluid_domain(cell_hp->neighbor(f)))
                     {
